@@ -1,8 +1,10 @@
 """Production admission/finalization regressions; deterministic, no native model."""
 import copy
+import sys
 import tempfile
 import threading
 import time
+import traceback
 import unittest
 from unittest.mock import Mock, patch
 
@@ -42,14 +44,28 @@ class AdmissionTests(unittest.TestCase):
         self.assertTrue(entered.wait(1))
         return job, release
 
-    def wait_terminal(self, jid):
-        deadline = time.monotonic() + 3
-        while time.monotonic() < deadline:
-            job = self.service.job(jid)
-            if job['status'] in {'completed', 'cancelled', 'failed'}:
-                return job
-            time.sleep(.01)
-        self.fail('Job never became terminal')
+    def wait_terminal(self, jid, timeout=60):
+        # Synchronize with finalization without making these functional checks
+        # depend on a three-second disk/scheduling budget. Production deadline
+        # assertions keep their own independently configured request budgets.
+        with self.service.lock:
+            running = self.service.running.get(jid)
+        if running and running[1] is not None:
+            thread = running[1]
+            thread.join(timeout)
+            if thread.is_alive():
+                # Do not acquire a possibly stalled worker's locks for diagnostics.
+                current = self.service.active_jobs.get(jid, {})
+                frame = sys._current_frames().get(thread.ident)
+                stack = ''.join(traceback.format_stack(frame)) if frame else '(unavailable)'
+                self.fail(f'Job {jid} did not finish within {timeout:g} seconds: '
+                          f"status={current.get('status')!r}, phase={current.get('phase')!r}, "
+                          f"error={current.get('error')!r}\nWorker stack:\n{stack}")
+        job = self.service.job(jid)
+        self.assertIn(job['status'], {'completed', 'cancelled', 'failed'},
+                      f"Worker exited without a terminal job: {job['status']!r}, {job.get('phase')!r}")
+        self.assertNotIn(jid, self.service.running)
+        return job
 
     def test_overload_rejected_before_capture_or_api_session(self):
         self.service.config['max_jobs'] = 1
@@ -370,6 +386,28 @@ class AdmissionTests(unittest.TestCase):
         self.assertEqual(len(self.service.store.jobs()), 1)
 
     def test_unknown_visual_tokens_do_not_hide_known_streamed_text_overflow(self):
+        self.check_unknown_visual_tokens_stream()
+
+    def test_unknown_visual_tokens_keep_overflow_after_slow_worker_start(self):
+        factory = self.service.scheduler.factory
+
+        def slow_factory(*args):
+            worker = factory(*args)
+            run = worker.run
+
+            def slow_run(*args):
+                # A valid job may outlast the former three-second fixture wait.
+                # Keep the real streaming, storage and finalization paths.
+                time.sleep(3.2)
+                yield from run(*args)
+
+            worker.run = slow_run
+            return worker
+
+        self.service.scheduler.factory = slow_factory
+        self.check_unknown_visual_tokens_stream()
+
+    def check_unknown_visual_tokens_stream(self):
         # Exercise a stale/third-party preflight with unknown fit: streaming must
         # preserve what the subsequently computed text lower bound already proves.
         model = self.service.model('qwen-chat')
@@ -380,8 +418,16 @@ class AdmissionTests(unittest.TestCase):
         job = self.service.submit({'session_id': sid, 'model': model['id'], 'prompt': 'Hello',
                                    'max_tokens': 32, 'tools_enabled': False, 'prepared': prepared}, captured=True)
         terminal = self.wait_terminal(job['id'])
+        self.assertEqual(terminal['status'], 'completed', terminal.get('error'))
+        self.assertTrue(terminal['text'])
+        self.assertGreater(terminal['context']['generated_tokens'], 0)
         self.assertFalse(terminal['context']['fits'])
         self.assertFalse(terminal['context']['visual_tokens_included'])
+        streamed = [event for event in self.service.store.events(job['id']) if event['kind'] == 'text']
+        self.assertTrue(streamed)
+        for event in streamed:
+            self.assertFalse(event['context']['fits'])
+            self.assertFalse(event['context']['visual_tokens_included'])
 
 
 if __name__ == '__main__':
