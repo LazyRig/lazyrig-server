@@ -186,12 +186,14 @@ class ServerContractTests(unittest.TestCase):
     def test_folder_registration_update_disable_and_remove(self):
         model = Path(self.temp.name) / 'model'
         fixture_export(model)
+        # The API resolves aliases, including Windows' short temporary paths.
+        expected_path = str(model.resolve())
         report = self.json('/api/models/inspect', {'path': str(model)})
         self.assertEqual(report['pipeline'], 'llm')
         registered = self.json('/api/models', {'id': 'local-model', 'path': str(model), 'device': 'TEST.CPU', 'memory_gib': 1, 'context_limit': 1024})
-        self.assertEqual(registered['path'], str(model))
+        self.assertEqual(registered['path'], expected_path)
         folders = self.json('/api/folders?path=' + urllib.parse.quote(self.temp.name))
-        self.assertIn(str(model), [d['path'] for d in folders['folders']])
+        self.assertIn(expected_path, [d['path'] for d in folders['folders']])
         self.json('/api/settings', {'model': 'local-model', 'enabled': False, 'generation': {'temperature': .25, 'max_tokens': 32}})
         self.assertNotIn('local-model', [m['id'] for m in self.json('/v1/models')['data']])
         self.assertEqual(json.loads(self.service.settings_path.read_text())['models'][-1]['generation']['temperature'], .25)
