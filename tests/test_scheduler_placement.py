@@ -13,6 +13,7 @@ from lazyrig.scheduler import PlacementAdmissionError, Scheduler, load_config
 from lazyrig.worker import Cancelled, NativeWorkerError, WorkerCleanupError
 from lazyrig.worker_status import WorkerProcessError
 from lazyrig.memory import MemoryPressureError, publish_load_memory
+from support import sparse_file
 
 
 class Worker:
@@ -214,8 +215,7 @@ class PlacementSchedulerTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             # Sparse fixture: exercise metadata-only screening without allocating
             # model weights in RAM or writing gigabytes to disk.
-            with (Path(folder) / 'openvino_model.bin').open('wb') as stream:
-                stream.truncate(18 * 1024**3)
+            sparse_file(Path(folder, 'openvino_model.bin'), 18 * 1024**3)
             self.model['path'] = folder
             self.model['placement']['devices'] = ['GPU.0', 'CPU']
             self.ensure()
@@ -231,8 +231,7 @@ class PlacementSchedulerTests(unittest.TestCase):
 
     def test_budget_edit_retries_primary_on_next_fresh_load_and_keeps_healthy_resident(self):
         with tempfile.TemporaryDirectory() as folder:
-            with (Path(folder) / 'openvino_model.bin').open('wb') as stream:
-                stream.truncate(26 * 1024**3)
+            sparse_file(Path(folder, 'openvino_model.bin'), 26 * 1024**3)
             self.model['path'] = folder
             self.model['placement']['devices'] = ['GPU.0', 'CPU']
             self.config['devices'][0].update(detected=True, total_memory_gib=24, budget_gib=20)
@@ -258,8 +257,7 @@ class PlacementSchedulerTests(unittest.TestCase):
 
     def test_shared_memory_budget_preserves_native_failure_and_host_pressure_fallback(self):
         with tempfile.TemporaryDirectory() as folder:
-            with (Path(folder) / 'openvino_model.bin').open('wb') as stream:
-                stream.truncate(26 * 1024**3)
+            sparse_file(Path(folder, 'openvino_model.bin'), 26 * 1024**3)
             self.model['path'] = folder
             self.model['placement']['devices'] = ['GPU.0', 'CPU']
             self.config['devices'][0].update(detected=True, total_memory_gib=24, budget_gib=36)

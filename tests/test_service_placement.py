@@ -14,7 +14,7 @@ from lazyrig.service import Service as NativeService
 from lazyrig.worker import NativeWorkerError
 from lazyrig.worker_status import WorkerProcessError
 from lazyrig.scheduler import PlacementAdmissionError
-from support import DEFAULT, FixtureWorker, Service
+from support import DEFAULT, FixtureWorker, Service, sparse_file
 from test_core import wait_job
 from test_device_info import DeviceCore
 from test_server_contract import fixture_export
@@ -138,8 +138,7 @@ class ServicePlacementTests(unittest.TestCase):
     def test_saved_device_budget_above_vram_unblocks_native_load_attempt(self):
         export = Path(self.temp.name) / 'oversized-export'
         fixture_export(export)
-        with (export / 'openvino_model.bin').open('wb') as stream:
-            stream.truncate(26 * 1024**3)
+        sparse_file(export / 'openvino_model.bin', 26 * 1024**3)
         self.service.config['devices'][0]['total_memory_gib'] = 24
         self.service.settings({'model': 'qwen-chat', 'path': str(export),
                                'placement': {'mode': 'auto', 'devices': ['GPU.1'], 'shares': {}}})

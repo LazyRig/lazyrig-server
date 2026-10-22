@@ -1,3 +1,4 @@
+from contextlib import closing
 import hashlib
 import json
 from pathlib import Path
@@ -21,7 +22,7 @@ class PlacementReportTests(unittest.TestCase):
                     'prompt': 'private prompt', 'request': {'secret': 'private secret'},
                     'placement_events': [{'kind': 'placement_rejected', 'target': 'HETERO:GPU.1,CPU',
                                           'preflight': self.preflight, 'placement': {'path': '/private/path'}}]}
-        with sqlite3.connect(self.path) as db:
+        with closing(sqlite3.connect(self.path)) as db, db:
             db.execute('CREATE TABLE jobs(id TEXT PRIMARY KEY,body TEXT)')
             db.execute('INSERT INTO jobs VALUES(?,?)', (self.jid, json.dumps(self.job)))
 
@@ -37,7 +38,7 @@ class PlacementReportTests(unittest.TestCase):
     def test_missing_and_ambiguous_jobs_fail_without_selecting_another_job(self):
         with self.assertRaisesRegex(ValueError, 'No saved job'):
             read_report(self.path, 'ffffffff')
-        with sqlite3.connect(self.path) as db:
+        with closing(sqlite3.connect(self.path)) as db, db:
             db.execute('INSERT INTO jobs VALUES(?,?)', ('71c8ad05' + 'f' * 24, '{}'))
         with self.assertRaisesRegex(ValueError, 'Several jobs'):
             read_report(self.path, '71c8ad05')
@@ -56,7 +57,7 @@ class PlacementReportTests(unittest.TestCase):
         self.assertFalse(missing.exists())
 
     def test_job_without_preflight_is_reported_explicitly(self):
-        with sqlite3.connect(self.path) as db:
+        with closing(sqlite3.connect(self.path)) as db, db:
             db.execute('UPDATE jobs SET body=?', (json.dumps({'id': self.jid}),))
         with self.assertRaisesRegex(ValueError, 'no saved manual-split'):
             read_report(self.path, '71c8ad05')

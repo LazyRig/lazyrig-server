@@ -79,7 +79,7 @@ class TemplateTests(unittest.TestCase):
 class ImportTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
-        self.root = Path(self.temp.name)
+        self.root = Path(self.temp.name).resolve()
         config = copy.deepcopy(DEFAULT)
         config['data_dir'] = str(self.root / 'data')
         self.service = Service(config)

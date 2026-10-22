@@ -39,7 +39,8 @@ class RuntimeReuseTests(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
         self.requirements = self.root / 'requirements.txt'
-        self.requirements.write_text(REQUIREMENTS)
+        # Hash fixtures require the historical LF bytes on Windows as well.
+        self.requirements.write_bytes(REQUIREMENTS.encode('utf-8'))
         self.profile = 'qwen-image-21'
         for name, value in [('ROOT', self.root), ('PROFILES', {self.profile: self.requirements})]:
             patcher = patch.object(conversion, name, value)

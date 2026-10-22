@@ -1,5 +1,6 @@
 """Deterministic workers for contract tests; never installed as a server mode."""
 import json
+import os
 import re
 import time
 from pathlib import Path
@@ -25,6 +26,40 @@ DEFAULT = {
          "plugin_config": {}}
     ]
 }
+
+
+def sparse_file(path, size):
+    """Create a zero-filled logical file without writing model-sized fixtures."""
+    path = Path(path)
+    with path.open('wb') as stream:
+        if os.name == 'nt':
+            import ctypes
+            from ctypes import wintypes
+            import msvcrt
+
+            # NTFS requires an explicit sparse attribute before extending EOF.
+            kernel = ctypes.WinDLL('kernel32', use_last_error=True)
+            handle = msvcrt.get_osfhandle(stream.fileno())
+            ioctl = kernel.DeviceIoControl
+            ioctl.argtypes = [wintypes.HANDLE, wintypes.DWORD, wintypes.LPVOID,
+                              wintypes.DWORD, wintypes.LPVOID, wintypes.DWORD,
+                              ctypes.POINTER(wintypes.DWORD), wintypes.LPVOID]
+            ioctl.restype = wintypes.BOOL
+            returned = wintypes.DWORD()
+            if not ioctl(handle, 0x000900C4,
+                         None, 0, None, 0, ctypes.byref(returned), None):
+                raise ctypes.WinError(ctypes.get_last_error())
+            # Python's Windows truncate uses _chsize_s, which writes zeros.
+            # Extend EOF directly so the sparse range stays unallocated.
+            stream.seek(size)
+            end_of_file = kernel.SetEndOfFile
+            end_of_file.argtypes = [wintypes.HANDLE]
+            end_of_file.restype = wintypes.BOOL
+            if not end_of_file(handle):
+                raise ctypes.WinError(ctypes.get_last_error())
+        else:
+            stream.truncate(size)
+    return path
 
 
 class TokenizerService(NativeTokenizer):

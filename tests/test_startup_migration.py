@@ -1,5 +1,5 @@
 """Large legacy history must not be read/re-written as a startup side effect."""
-from contextlib import redirect_stdout
+from contextlib import closing, redirect_stdout
 import builtins
 import io
 import json
@@ -21,7 +21,7 @@ class StartupMigrationTests(unittest.TestCase):
         self.path = self.directory / 'state.sqlite3'
 
     def legacy(self, records, partial=False):
-        with sqlite3.connect(self.path) as db:
+        with closing(sqlite3.connect(self.path)) as db, db:
             db.executescript('''
                 CREATE TABLE jobs(id TEXT PRIMARY KEY,body TEXT);
                 CREATE TABLE events(seq INTEGER PRIMARY KEY AUTOINCREMENT,job TEXT,body TEXT);
@@ -92,7 +92,7 @@ class StartupMigrationTests(unittest.TestCase):
     def test_interrupted_column_migration_and_old_beta_delta_replay(self):
         self.legacy([self.event('before')], partial=True)
         # An original-beta delta may depend on a legacy row that has no kind tag.
-        with sqlite3.connect(self.path) as db:
+        with closing(sqlite3.connect(self.path)) as db, db:
             delta = {'item': {'kind': 'text', 'time': 2},
                      'fields': {'text': [6, ' after'], 'content': [6, ' after'], 'reasoning_content': [0, '']}}
             db.execute("INSERT INTO events(job,body,encoding,checkpoint,kind) VALUES(?,?,2,0,'text')",
@@ -107,7 +107,7 @@ class StartupMigrationTests(unittest.TestCase):
     def test_partial_legacy_channels_mix_with_existing_compact_rows(self):
         self.legacy([self.event('a', reasoning_content='reason'),
                      {'kind': 'text', 'time': 2, 'text': 'ab'}], partial=True)
-        with sqlite3.connect(self.path) as db:
+        with closing(sqlite3.connect(self.path)) as db, db:
             delta = {'item': {'kind': 'text', 'time': 3}, 'fields': {
                 'text': [2, 'c'], 'content': [1, 'bc'], 'reasoning_content': [6, 'ing']}}
             db.execute("INSERT INTO events(job,body,encoding,checkpoint,kind) VALUES(?,?,2,0,'text')",

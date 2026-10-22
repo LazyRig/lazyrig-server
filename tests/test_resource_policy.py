@@ -15,7 +15,7 @@ from lazyrig.service import Service as NativeService, _record_failure
 from lazyrig.storage import job_summary
 from lazyrig.worker import NativeWorkerError
 from lazyrig.worker_status import WorkerProcessError
-from support import Service
+from support import Service, sparse_file
 from test_core import wait_job
 from test_scheduler_placement import Worker
 from test_service_placement import hardware_config
@@ -26,8 +26,7 @@ class ResourcePolicyTests(unittest.TestCase):
     def setUp(self):
         self.folder = tempfile.TemporaryDirectory()
         self.addCleanup(self.folder.cleanup)
-        with Path(self.folder.name, 'openvino_model.bin').open('wb') as file:
-            file.truncate(int(23.88 * 1024**3))
+        sparse_file(Path(self.folder.name, 'openvino_model.bin'), int(23.88 * 1024**3))
         self.model = {'id': 'qwen', 'pipeline': 'llm', 'task': 'text-generation',
                       'path': self.folder.name, 'device': 'GPU.1', 'memory_gib': 16,
                       'placement': {'mode': 'auto', 'devices': ['GPU.1', 'GPU.0'], 'shares': {}}}
@@ -195,26 +194,27 @@ class ResourcePolicyTests(unittest.TestCase):
 
 class ResourcePolicyPersistenceTests(unittest.TestCase):
     def test_settings_roundtrip_rejection_and_durable_attempts(self):
-        with tempfile.TemporaryDirectory() as folder:
-            export = Path(folder, 'export')
-            fixture_export(export)
-            config = hardware_config(folder)
-            config['models'][0]['path'] = str(export)
-            service = Service(config)
-            self.addCleanup(service.close)
-            policy = {'mode': 'split', 'devices': ['GPU.1', 'CPU'], 'shares': {},
-                      'shared_memory': 'budget', 'allow_fallback': False}
-            service.settings({'model': 'qwen-chat', 'placement': policy})
-            before = copy.deepcopy(service.model('qwen-chat'))
-            with self.assertRaisesRegex(ValueError, 'exactly one'):
-                service.settings({'model': 'qwen-chat', 'placement': {**policy, 'mode': 'single'}})
-            self.assertEqual(service.model('qwen-chat'), before)
-            job = wait_job(service, service.control('qwen-chat', 'load')['id'])
-            self.assertEqual(job['status'], 'completed', job.get('error'))
-            self.assertEqual(job['placement_attempts'][0]['target'], 'HETERO:GPU.1,CPU')
-            self.assertEqual(service.state(summary=True)['jobs'][0]['placement_attempts'][0]['status'], 'succeeded')
-            service.close()
-            restored = Service(config)
-            self.addCleanup(restored.close)
-            self.assertEqual(restored.model('qwen-chat')['placement'], policy)
-            self.assertEqual(restored.store.job(job['id'])['placement_attempts'], job['placement_attempts'])
+        # Registered first, so both services close before their folder is removed.
+        folder = self.enterContext(tempfile.TemporaryDirectory())
+        export = Path(folder, 'export')
+        fixture_export(export)
+        config = hardware_config(folder)
+        config['models'][0]['path'] = str(export)
+        service = Service(config)
+        self.addCleanup(service.close)
+        policy = {'mode': 'split', 'devices': ['GPU.1', 'CPU'], 'shares': {},
+                  'shared_memory': 'budget', 'allow_fallback': False}
+        service.settings({'model': 'qwen-chat', 'placement': policy})
+        before = copy.deepcopy(service.model('qwen-chat'))
+        with self.assertRaisesRegex(ValueError, 'exactly one'):
+            service.settings({'model': 'qwen-chat', 'placement': {**policy, 'mode': 'single'}})
+        self.assertEqual(service.model('qwen-chat'), before)
+        job = wait_job(service, service.control('qwen-chat', 'load')['id'])
+        self.assertEqual(job['status'], 'completed', job.get('error'))
+        self.assertEqual(job['placement_attempts'][0]['target'], 'HETERO:GPU.1,CPU')
+        self.assertEqual(service.state(summary=True)['jobs'][0]['placement_attempts'][0]['status'], 'succeeded')
+        service.close()
+        restored = Service(config)
+        self.addCleanup(restored.close)
+        self.assertEqual(restored.model('qwen-chat')['placement'], policy)
+        self.assertEqual(restored.store.job(job['id'])['placement_attempts'], job['placement_attempts'])

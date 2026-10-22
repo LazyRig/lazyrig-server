@@ -33,9 +33,9 @@ class HTTPHardeningTests(unittest.TestCase):
         self.service = Service(config)
         self.server = None
 
-    def start(self, *, cap=8, tls=None):
+    def start(self, *, cap=8, tls=None, timeout=.25):
         self.server = BoundedHTTPServer(('127.0.0.1', 0), handler(self.service),
-                                       max_connections=cap, http_timeout=.25, tls=tls)
+                                       max_connections=cap, http_timeout=timeout, tls=tls)
         self.thread = threading.Thread(target=self.server.serve_forever, kwargs={'poll_interval': .01}, daemon=True)
         self.thread.start()
 
@@ -155,14 +155,18 @@ class HTTPHardeningTests(unittest.TestCase):
         self.assertEqual(self.request('/api/health')[0], 200)
 
     def test_connection_cap_is_retryable_and_releases_after_disconnect(self):
-        self.start(cap=1)
+        self.start(cap=1, timeout=2)
         with socket.create_connection(self.server.server_address, timeout=2) as slow:
-            slow.sendall(b'GET /api/health HTTP/1.1\r\n')
             self.wait_connections(1)
-            status, headers, _ = self.request('/api/health')
-            self.assertEqual(status, 503)
-            self.assertEqual(headers['Retry-After'], '1')
-            self.assertEqual(headers['X-Should-Retry'], 'true')
+            # Capacity is checked before reading a request. Read the rejection
+            # without racing a client write against Windows closing the socket.
+            with socket.create_connection(self.server.server_address, timeout=2) as excess:
+                with http.client.HTTPResponse(excess) as response:
+                    response.begin()
+                    self.assertEqual(response.status, 503)
+                    self.assertEqual(response.getheader('Retry-After'), '1')
+                    self.assertEqual(response.getheader('X-Should-Retry'), 'true')
+                    self.assertEqual(response.read(), b'')
         self.wait_connections(0)
         self.assertEqual(self.request('/api/health')[0], 200)
 

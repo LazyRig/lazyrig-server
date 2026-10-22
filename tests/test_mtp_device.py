@@ -11,7 +11,7 @@ from lazyrig.config import validate
 from lazyrig.runtime_settings import pipeline_properties
 from lazyrig.scheduler import PlacementAdmissionError, Scheduler, load_config
 from lazyrig.worker import NativeWorkerError
-from support import DEFAULT
+from support import DEFAULT, sparse_file
 from test_scheduler_placement import Worker
 
 
@@ -175,8 +175,7 @@ class MTPDeviceTests(unittest.TestCase):
         self.assertEqual(placement.lease_devices(self.model, self.config), {'@model:chat', 'GPU.1', 'CPU'})
 
     def test_mtp_shared_memory_budget_allows_native_attempt_on_primary_gpu(self):
-        with Path(self.folder.name, 'openvino_language_model.bin').open('wb') as stream:
-            stream.truncate(26 * 1024**3)
+        sparse_file(Path(self.folder.name, 'openvino_language_model.bin'), 26 * 1024**3)
         self.model['placement'] = {'mode': 'auto', 'devices': ['GPU.1', 'GPU.0'], 'shares': {}}
         self.config['devices'][0].update(detected=True, total_memory_gib=24, budget_gib=36)
         for draft in ('', 'GPU.1', 'GPU.0', 'CPU'):
@@ -192,8 +191,7 @@ class MTPDeviceTests(unittest.TestCase):
                 self.scheduler.close()
 
     def test_oversized_main_model_explains_mtp_limit_for_every_draft_device(self):
-        with Path(self.folder.name, 'openvino_language_model.bin').open('wb') as stream:
-            stream.truncate(24 * 1024**3)  # Sparse metadata fixture; no model allocation.
+        sparse_file(Path(self.folder.name, 'openvino_language_model.bin'), 24 * 1024**3)
         self.model['placement'] = {'mode': 'auto', 'devices': ['GPU.1', 'GPU.0'], 'shares': {}}
         for draft in ('', 'GPU.1', 'GPU.0', 'CPU'):
             with self.subTest(draft=draft):
@@ -218,8 +216,7 @@ class MTPDeviceTests(unittest.TestCase):
         self.assertEqual([m['_placement']['target'] for m in self.calls], ['CPU'])
 
     def test_non_mtp_budget_error_does_not_imply_an_mtp_restriction(self):
-        with Path(self.folder.name, 'openvino_language_model.bin').open('wb') as stream:
-            stream.truncate(24 * 1024**3)
+        sparse_file(Path(self.folder.name, 'openvino_language_model.bin'), 24 * 1024**3)
         self.model['placement'] = {'mode': 'auto', 'devices': ['GPU.1'], 'shares': {}}
         self.model['mtp']['enabled'] = False
         with self.assertRaises(PlacementAdmissionError) as caught:

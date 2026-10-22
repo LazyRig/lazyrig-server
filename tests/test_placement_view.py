@@ -16,7 +16,7 @@ from lazyrig.worker import Cancelled, NativeWorkerError, ProcessWorker, WorkerCl
 class PlacementViewTests(unittest.TestCase):
     def setUp(self):
         self.directory = self.enterContext(tempfile.TemporaryDirectory())
-        self.source = Path(self.directory) / 'model'
+        self.source = Path(self.directory).resolve() / 'model'
         self.source.mkdir()
         self.xml = b'<net name="original"/>'
         self.normalized = b'<net name="normalized"/>'
@@ -148,10 +148,10 @@ class PlacementViewTests(unittest.TestCase):
         guard.diagnostics.return_value = {'minimum_available_gib': 32}
         stack.enter_context(patch('lazyrig.worker.LoadMemoryGuard', return_value=guard))
         stack.enter_context(patch('lazyrig.worker.mp.get_context', return_value=context))
-        stack.enter_context(patch('lazyrig.worker.os.killpg'))
+        stack.enter_context(patch('lazyrig.worker.os.killpg', create=True))
         # This suite exercises portable parent lifecycle logic. Windows Job
         # membership and OS termination are covered by their dedicated tests.
-        stack.enter_context(patch('lazyrig.worker.os.name', 'posix'))
+        stack.enter_context(patch('lazyrig.windows_job.WindowsJob'))
         return process, context, state
 
     def test_parent_passes_view_to_worker_and_removes_it_after_handle_release(self):

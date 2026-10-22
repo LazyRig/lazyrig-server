@@ -37,9 +37,11 @@ class MemoryReadingTests(unittest.TestCase):
 
     def _files(self, values):
         def read(path, *args, **kwargs):
-            if str(path) not in values:
+            # The simulated Linux filesystem also runs under Windows pathlib.
+            key = path.as_posix()
+            if key not in values:
                 raise FileNotFoundError(str(path))
-            return values[str(path)]
+            return values[key]
         return patch.object(Path, 'read_text', read)
 
     def test_linux_memavailable_does_not_mistake_reclaimable_cache_for_pressure(self):
@@ -220,7 +222,7 @@ class WorkerLoadGuardTests(unittest.TestCase):
         for target, value in (
                 ('lazyrig.worker.LoadMemoryGuard', Mock(return_value=self.guard)),
                 ('lazyrig.worker.mp.get_context', Mock(return_value=self.context)),
-                ('lazyrig.worker.os.name', 'posix')):
+                ('lazyrig.windows_job.WindowsJob', Mock())):
             patcher = patch(target, value)
             patcher.start()
             self.addCleanup(patcher.stop)
