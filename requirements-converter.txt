@@ -1,0 +1,9 @@
+--index-url https://pypi.org/simple
+openvino-genai==2026.4.0.0
+optimum-intel==2.2.0
+diffusers==0.37.0
+accelerate>=1.0,<2
+sentencepiece>=0.2,<1
+protobuf>=4,<7
+Jinja2>=3.1.6,<4
+Pillow>=10,<13

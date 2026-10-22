@@ -1,0 +1,18 @@
+{
+  "mode": "openvino",
+  "data_dir": "server-data",
+  "host": "127.0.0.1",
+  "port": 8765,
+  "api_key": "",
+  "allowed_origins": [],
+  "browser_access": "origins",
+  "tls_cert": "",
+  "tls_key": "",
+  "models_dir": "models",
+  "download_max_gib": 100,
+  "load_timeout_seconds": 900,
+  "request_timeout_seconds": 3600,
+  "devices": [],
+  "models": [],
+  "terminal_metrics": true
+}

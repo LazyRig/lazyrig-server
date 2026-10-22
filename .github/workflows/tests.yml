@@ -1,0 +1,30 @@
+name: Tests
+on: [push, pull_request, workflow_dispatch]
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      matrix:
+        os: [ubuntu-latest]
+        python: ['3.12', '3.13']
+        include:
+          - os: windows-latest
+            python: '3.13'
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Install development dependencies
+        run: python -m pip install -r requirements-dev.txt
+      - name: Run API and lifecycle regressions
+        run: python -m unittest discover -s tests -v
+      - name: Check dashboard syntax
+        run: python -c "import glob, subprocess; [subprocess.run(['node', '--check', p], check=True) for p in glob.glob('lazyrig/web/*.js')]"
+      - name: Build end-user release and creator kit
+        run: python tools/build_release.py --include-creator-kit

@@ -1,0 +1,4 @@
+-r requirements-openvino.txt
+numpy>=1.26,<2.6
+openai>=1.50,<4
+# Optional browser checks: pip install playwright; playwright install chromium

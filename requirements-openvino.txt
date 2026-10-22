@@ -1,0 +1,5 @@
+# 64-bit CPython 3.12 or 3.13. Windows setup prefers 3.13. Select a newer compatible build if your model requires it.
+openvino-genai>=2026.4,<2027
+Pillow>=10,<13
+Jinja2>=3.1.6,<4
+packaging>=24,<27
