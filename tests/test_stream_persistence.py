@@ -10,6 +10,7 @@ import tempfile
 import threading
 import time
 import unittest
+from unittest.mock import patch
 
 from lazyrig.compat import start_chat
 from lazyrig.storage import Store
@@ -253,7 +254,14 @@ class StreamServiceTests(unittest.TestCase):
         self.service.scheduler.factory = factory
         receipt = start_chat(self.service, {'model': 'qwen-chat', 'max_tokens': 1024,
                             'messages': [{'role': 'user', 'content': 'Generate text.'}]})
-        self.assertTrue(entered.wait(5))
+        # All 512 durable commits must finish before inspecting/cancelling the
+        # stream. This is a persistence contract, not a disk-speed benchmark;
+        # shared Windows runners can need more than five seconds for this work.
+        if not entered.wait(60):
+            current = self.service.job(receipt['id'])
+            self.fail('Streaming fixture did not finish within 60 seconds: '
+                      f"{counts['commits']}/512 commits, status={current['status']}, "
+                      f"error={current.get('error')!r}")
         live = self.service.job(receipt['id'])
         self.assertEqual(live['status'], 'running')
         self.assertEqual(live['text'], output)
@@ -279,6 +287,19 @@ class StreamServiceTests(unittest.TestCase):
 
     def test_cancellation_keeps_latest_text_without_per_chunk_snapshots(self):
         self.generation('cancelled')
+
+    def test_cancellation_keeps_latest_text_with_slow_durable_writes(self):
+        # Real commits still run. Their combined latency exceeds the former
+        # five-second fixture deadline, as it can on a busy Windows runner.
+        event = self.service.store.event
+
+        def slow_event(jid, kind, **data):
+            if kind == 'text':
+                time.sleep(.012)
+            return event(jid, kind, **data)
+
+        with patch.object(self.service.store, 'event', side_effect=slow_event):
+            self.generation('cancelled')
 
     def test_worker_failure_keeps_latest_text_without_per_chunk_snapshots(self):
         self.generation('failed')
