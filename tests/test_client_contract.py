@@ -144,7 +144,8 @@ class ClientContractTests(unittest.TestCase):
             self.assertEqual([c['action'] for c in workers.calls], ['text'])
             generated = client.images.generate(model='qwen-image', prompt='A silver train', size='512x512', response_format='url')
             wait_job(self.service, generated.x_job_id)
-            self.assertFalse(self.service.scheduler.resident)  # No eager text reload.
+            # Auto retention keeps the image worker; text reload waits for demand.
+            self.assertEqual(set(self.service.scheduler.resident), {'qwen-image'})
             self.assertTrue(generated.data[0].url.startswith(self.base+'/artifacts/'))
             import base64
             edited = client.images.edit(model='qwen-image', prompt='Add rain', image=('input.png', base64.b64decode(image_url().split(',')[1]), 'image/png'), size='512x512')

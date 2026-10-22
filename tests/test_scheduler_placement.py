@@ -193,7 +193,7 @@ class PlacementSchedulerTests(unittest.TestCase):
         self.assertEqual(placement.devices(self.calls[0][0]), {'GPU.0', 'GPU.1'})
         legacy = {**self.model, 'id': 'legacy'}
         legacy.pop('placement')
-        with self.assertRaisesRegex(PlacementAdmissionError, "reserves 15 GiB, exceeding GPU.0's 12 GiB budget"):
+        with self.assertRaisesRegex(PlacementAdmissionError, r"reserves 15\.0 GiB, exceeding GPU\.0's 12\.0 GiB budget"):
             self.ensure(legacy)
 
     def test_cleanup_failure_never_starts_another_candidate(self):

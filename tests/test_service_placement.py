@@ -183,7 +183,7 @@ class ServicePlacementTests(unittest.TestCase):
                 job = wait_job(self.service, submit()['id'])
                 self.assertEqual(job['status'], 'failed')
                 self.assertEqual(job['error_code'], 'host_memory_pressure')
-                self.assertIn('5.00 GiB available', job['error'])
+                self.assertIn('5.0 GiB available', job['error'])
                 self.assertFalse(job.get('placement_events'))
                 self.assertFalse(self.service.scheduler.resident)
 

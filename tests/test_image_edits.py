@@ -236,7 +236,8 @@ class NativeEditContractTests(unittest.TestCase):
                                        Image2ImagePipeline=Pipeline,TorchGenerator=lambda seed:('torch-seed',seed))
             model={'pipeline':'image','_image_operation':'edit','path':directory,'device':'CPU','runtime_profile':'qwen-image-21'}
             with patch.dict(sys.modules,{'openvino_genai':fake}):_child(Connection(),'openvino',model)
-            self.assertEqual([e['kind'] for e in events],['ready','progress','progress','result'],events)
+            self.assertEqual([e['kind'] for e in events],
+                             ['worker_diagnostics','ready','progress','progress','result'],events)
             self.assertEqual(events[-1]['inference']['denoising'], {'step':2,'steps':2,'callbacks':2})
             self.assertEqual(events[-1]['inference']['seed'],42)
             self.assertTrue(events[-1]['inference']['classifier_free_guidance'])

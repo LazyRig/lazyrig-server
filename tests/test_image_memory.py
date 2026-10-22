@@ -277,7 +277,7 @@ class CleanupTests(unittest.TestCase):
             with patch.dict(sys.modules, {'openvino_genai': fake, 'openvino': types.SimpleNamespace(Tensor=Tensor)}):
                 _child(Connection(), 'openvino', {'pipeline': 'image', '_image_operation': 'edit',
                        'runtime_profile': 'qwen-image-21', 'path': directory, 'device': 'CPU'})
-            self.assertEqual([e['kind'] for e in events], ['ready', 'result'], events)
+            self.assertEqual([e['kind'] for e in events], ['worker_diagnostics', 'ready', 'result'], events)
 
 
 if __name__ == '__main__': unittest.main()

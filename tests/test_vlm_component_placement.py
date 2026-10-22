@@ -143,16 +143,20 @@ class VLMComponentPlacementTests(unittest.TestCase):
         value['_placement']['devices'].append('CPU')
         value['_placement']['target'] += ',CPU'
         value['_placement_preflight']['language_input_device'] = 'CPU'
-        value['_cpu_inference_threads'] = 3
+        # One thread is supported even by small CI runners; larger requests may
+        # be capped by OpenVINO to the processors available on that machine.
+        value['_cpu_inference_threads'] = 1
         props = pipeline_properties(object(), value)
         from openvino import opset13 as ops
         parameter = ops.parameter([1, 4], ov.Type.f32)
         graph = ov.Model([ops.add(parameter, ops.constant(1, ov.Type.f32))], [parameter])
         # No GPU is available here: retaining either foreign priority would fail.
-        compiled = core.compile_model(graph, pipeline_target(value),
-                                      native_role_properties(props, 'text_embeddings', pipeline_target(value)))
+        embedding = native_role_properties(props, 'text_embeddings', pipeline_target(value))
+        self.assertEqual(embedding['MULTI_DEVICE_PRIORITIES'], 'CPU')
+        self.assertEqual(embedding['DEVICE_PROPERTIES']['CPU']['INFERENCE_NUM_THREADS'], 1)
+        compiled = core.compile_model(graph, pipeline_target(value), embedding)
         self.assertEqual(compiled.get_property('EXECUTION_DEVICES'), ['CPU'])
-        self.assertEqual(compiled.get_property('DEVICE_PROPERTIES')['CPU']['INFERENCE_NUM_THREADS'], 3)
+        self.assertEqual(compiled.get_property('DEVICE_PROPERTIES')['CPU']['INFERENCE_NUM_THREADS'], 1)
 
     @unittest.skipIf(genai is None, 'OpenVINO GenAI is not installed')
     def test_native_vlm_bare_hetero_forwards_exact_target_language_properties(self):
