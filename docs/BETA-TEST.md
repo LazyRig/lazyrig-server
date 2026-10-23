@@ -249,8 +249,7 @@ model quality or image generation settings in this hardening release.
 
 ## Evidence and limits
 
-The creator kit includes `maintainer/BETA-TEST-VALIDATION.md`, which distinguishes
-executed regression checks from pending Windows/GPU and real-model validation.
+Check the hosted Actions result for the exact source revision.
 The CI workflow includes a Windows Python 3.13 lane in addition to Linux Python
 3.12/3.13. A configured workflow is not a completed CI run and does not establish
 device compatibility. Hosted fixture tests do not measure inference throughput.

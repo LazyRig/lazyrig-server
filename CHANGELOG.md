@@ -334,9 +334,8 @@ original data together for rollback. No public release is created automatically.
 
 Shared-device inference remains serial; independent-device overlap remains
 supported. No continuous-batching worker, multi-reference image edit, model setting
-or image prompt change is introduced. The creator kit contains
-executed checks and outstanding native Windows/GPU validation in
-`maintainer/BETA-TEST-VALIDATION.md`.
+or image prompt change is introduced. See `docs/BETA-TEST.md` for the public
+validation scope and known limits.
 
 ## v0.4 beta
 

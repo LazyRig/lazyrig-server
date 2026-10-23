@@ -34,15 +34,14 @@ python tests/browser_cancellation.py
 ```
 
 Evidence is written to `test-results/`, excluded from releases.
-See [beta validation](maintainer/BETA-TEST-VALIDATION.md) for current results and
-[historical validation](maintainer/VALIDATION.md) for earlier checks/native probe commands.
+Use the Actions run for the exact revision to check hosted results.
+Keep local validation notes and publishing handoffs outside the repository.
 
 ## Refresh tutorial screenshots
 
-The public guide uses actual v0.41 captures supplied by the operator. See the
-[screenshot record](maintainer/publication/SCREENSHOTS.md) for source filenames,
-hashes and the scope of each result. Keep captures unmodified unless an edit is
-explicitly approved; update the relevant instructions and captions together.
+The public guide uses actual v0.41 captures in `docs/images/tutorial/`.
+Review every image for credentials and personal information before publication.
+Update the relevant instructions and captions together.
 Never present a fixture response as native model validation.
 
 The legacy illustrative capture utility is available for development. With
@@ -94,10 +93,10 @@ The default build creates `dist/LazyRig_Server_v0.41beta.zip` for end users: the
 runnable application, setup files, user guides, screenshots and licenses. It
 excludes tests, development tools, CI configuration and maintainer documents.
 
-To also build the complete GitHub repository as a separate creator kit:
+To also build an archive of the public source and development files:
 
 ```sh
-python tools/build_release.py --include-creator-kit
+python tools/build_release.py --include-source
 ```
 
 Both archives are deterministic for identical source bytes and include their own
@@ -110,7 +109,9 @@ a substitute for reviewing files you add. Update `lazyrig/__init__.py`, the
 README, changelog and release notes together. Dashboard version text comes from
 the server.
 
-[Publishing](maintainer/PUBLISHING.md) describes the full process. Ready-to-paste
-release and announcement content is in `maintainer/publication/`. Contributions to LazyRig are under the [Apache License 2.0](LICENSE),
+Personal handoffs, internal validation records and announcement drafts belong
+outside the repository. Both archive selectors exclude those files.
+
+Contributions to LazyRig are under the [Apache License 2.0](LICENSE),
 unless explicitly stated otherwise. Preserve upstream notices and do not add
 model weights or third-party code without checking its terms.

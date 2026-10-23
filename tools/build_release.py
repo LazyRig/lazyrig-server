@@ -1,4 +1,4 @@
-"""Build the end-user release and, optionally, a separate GitHub creator kit."""
+"""Build the end-user release and, optionally, a public source archive."""
 import argparse
 import hashlib
 import json
@@ -22,12 +22,12 @@ USER_TREE_PATTERNS = {
                 'web/*.html', 'web/*.js', 'web/*.css', 'web/*.svg', 'web/*.png'),
     'docs': ('images/tutorial/*.png',), 'configs': ('*.example.json',),
 }
-CREATOR_ROOT_FILES = {
+REPOSITORY_ROOT_FILES = {
     '.gitignore', '.gitattributes', '.editorconfig', 'CONTRIBUTING.md',
-    'requirements-dev.txt', 'CREATOR-START-HERE.md',
+    'requirements-dev.txt',
 }
-CREATOR_TREE_PATTERNS = {
-    'tests': ('*.py',), 'tools': ('*.py',), 'maintainer': ('*.md', 'publication/*.md'),
+REPOSITORY_TREE_PATTERNS = {
+    'tests': ('*.py',), 'tools': ('*.py',),
     '.github': ('*.md',), '.github/ISSUE_TEMPLATE': ('*.md', '*.yml', '*.yaml'),
     '.github/workflows': ('*.yml', '*.yaml'),
 }
@@ -51,7 +51,7 @@ def release_files(root=ROOT):
 
 def repository_files(root=ROOT):
     """Select the complete publishable repository, without local runtime data."""
-    return sorted(set(release_files(root)) | _select(root, CREATOR_ROOT_FILES, CREATOR_TREE_PATTERNS))
+    return sorted(set(release_files(root)) | _select(root, REPOSITORY_ROOT_FILES, REPOSITORY_TREE_PATTERNS))
 
 
 def _build(destination, root, creator):
@@ -64,8 +64,7 @@ def _build(destination, root, creator):
         'lazyrig/prompts/image_editing.txt', 'tools/image_job.py',
     }
     if creator:
-        required |= CREATOR_ROOT_FILES | {'tools/build_release.py', 'maintainer/PUBLISHING.md',
-                                         'maintainer/publication/GITHUB-RELEASE.md'}
+        required |= REPOSITORY_ROOT_FILES | {'tools/build_release.py'}
     missing = required - {p.relative_to(root).as_posix() for p in files}
     if missing:
         raise ValueError('Required package files missing: ' + ', '.join(sorted(missing)))
@@ -76,7 +75,7 @@ def _build(destination, root, creator):
     version = version_match[1]
     destination = Path(destination)
     destination.mkdir(parents=True, exist_ok=True)
-    label = 'Creator_Kit' if creator else 'Server'
+    label = 'Source' if creator else 'Server'
     archive = destination / f'LazyRig_{label}_v{version}.zip'
     payload = {p.relative_to(root).as_posix(): p.read_bytes() for p in files}
     manifest = {name: hashlib.sha256(data).hexdigest() for name, data in payload.items()}
@@ -102,16 +101,16 @@ def build(destination, root=ROOT):
     return _build(destination, root, creator=False)
 
 
-def build_creator_kit(destination, root=ROOT):
+def build_source_archive(destination, root=ROOT):
     return _build(destination, root, creator=True)
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output-dir', default=str(ROOT / 'dist'))
-    parser.add_argument('--include-creator-kit', action='store_true',
-                        help='Also build a complete GitHub repository with maintainer files')
+    parser.add_argument('--include-source', '--include-creator-kit', dest='include_source',
+                        action='store_true', help='Also build the public source archive')
     args = parser.parse_args()
     build(args.output_dir)
-    if args.include_creator_kit:
-        build_creator_kit(args.output_dir)
+    if args.include_source:
+        build_source_archive(args.output_dir)

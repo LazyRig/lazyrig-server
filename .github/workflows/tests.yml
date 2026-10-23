@@ -26,5 +26,5 @@ jobs:
         run: python -m unittest discover -s tests -v
       - name: Check dashboard syntax
         run: python -c "import glob, subprocess; [subprocess.run(['node', '--check', p], check=True) for p in glob.glob('lazyrig/web/*.js')]"
-      - name: Build end-user release and creator kit
-        run: python tools/build_release.py --include-creator-kit
+      - name: Build end-user release and public source archive
+        run: python tools/build_release.py --include-source

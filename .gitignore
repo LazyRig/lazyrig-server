@@ -33,3 +33,7 @@ data-openvino/
 configs/openvino.local.json
 configs/*.local.json
 *.sqlite3*
+
+# Private handoff and internal records must stay outside the public repository.
+/CREATOR-START-HERE.md
+/maintainer/

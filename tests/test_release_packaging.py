@@ -11,7 +11,7 @@ import tempfile
 import unittest
 import zipfile
 
-from tools.build_release import ROOT, build, build_creator_kit, release_files, repository_files
+from tools.build_release import ROOT, build, build_source_archive, release_files, repository_files
 from lazyrig import __version__
 
 
@@ -46,6 +46,20 @@ class PromptPackagingTests(unittest.TestCase):
                 path.write_text('Packaging fixture.\n')
             self.assertEqual({p.relative_to(root).as_posix() for p in release_files(root)}, current)
 
+    def test_private_handoff_cannot_enter_public_source_archive(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            public = {'README.md', 'CONTRIBUTING.md', 'tests/test_example.py',
+                      'tools/build_release.py', '.github/workflows/tests.yml'}
+            private = {'CREATOR-START-HERE.md', 'maintainer/PUBLISHING.md',
+                       'maintainer/PRIVATE-NOTES.md', 'maintainer/publication/DRAFT.md'}
+            for name in public | private:
+                path = root / name
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text('Packaging fixture.\n')
+            self.assertEqual({p.relative_to(root).as_posix() for p in repository_files(root)},
+                             public)
+
     def test_symlinked_content_is_not_packaged(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory) / 'source'
@@ -69,7 +83,7 @@ class SplitArchiveTests(unittest.TestCase):
         cls.output = Path(cls.temp.name)
         with redirect_stdout(io.StringIO()):
             cls.user_path = build(cls.output)
-            cls.creator_path = build_creator_kit(cls.output)
+            cls.creator_path = build_source_archive(cls.output)
         cls.archives = {}
         for role, path in (('user', cls.user_path), ('creator', cls.creator_path)):
             with zipfile.ZipFile(path) as archive:
@@ -108,20 +122,16 @@ class SplitArchiveTests(unittest.TestCase):
                      'tools/build_release.py', 'docs/VALIDATION.md', 'docs/PUBLISHING.md'):
             self.assertNotIn(name, files)
 
-    def test_creator_archive_contains_complete_repository_and_publication_content(self):
+    def test_source_archive_contains_development_files_without_private_handoff(self):
         files = self.archives['creator']
         needed = {
-            'CREATOR-START-HERE.md', 'CONTRIBUTING.md', 'requirements-dev.txt',
+            'CONTRIBUTING.md', 'requirements-dev.txt',
             '.gitignore', '.gitattributes', '.github/workflows/tests.yml',
             'tools/build_release.py', 'tests/test_release_packaging.py', 'tests/support.py',
-            'maintainer/PUBLISHING.md', 'maintainer/VALIDATION.md',
-            'maintainer/BETA-TEST-VALIDATION.md',
-            'maintainer/ARCHITECTURE.md', 'maintainer/SOURCES.md',
-            'maintainer/publication/REPOSITORY-DETAILS.md',
-            'maintainer/publication/GITHUB-RELEASE.md',
-            'maintainer/publication/ANNOUNCEMENT.md', 'maintainer/publication/SHORT-POST.md',
         }
         self.assertFalse(needed - files.keys())
+        self.assertNotIn('CREATOR-START-HERE.md', files)
+        self.assertFalse(any(name.startswith('maintainer/') for name in files))
         self.assertFalse(any(name.endswith('.zip') for name in files))
         self.assertFalse(any(name.startswith(('server-data/', '.venv/', '.runtime/', 'test-results/'))
                              for name in files))
@@ -133,7 +143,7 @@ class SplitArchiveTests(unittest.TestCase):
 
     def test_prerelease_version_is_not_truncated_in_either_archive_name(self):
         self.assertIn('beta', __version__)
-        for label, path in (('Server', self.user_path), ('Creator_Kit', self.creator_path)):
+        for label, path in (('Server', self.user_path), ('Source', self.creator_path)):
             self.assertEqual(path.name, f'LazyRig_{label}_v{__version__}.zip')
             self.assertIn(f'__version__ = "{__version__}"'.encode(),
                           self.archives['user']['lazyrig/__init__.py'])
@@ -154,7 +164,7 @@ class SplitArchiveTests(unittest.TestCase):
 
     def test_identical_source_produces_repeatable_archives(self):
         with redirect_stdout(io.StringIO()):
-            rebuilt = (build(self.output / 'repeat'), build_creator_kit(self.output / 'repeat'))
+            rebuilt = (build(self.output / 'repeat'), build_source_archive(self.output / 'repeat'))
         for original, repeated in zip((self.user_path, self.creator_path), rebuilt):
             self.assertEqual(original.read_bytes(), repeated.read_bytes())
 
