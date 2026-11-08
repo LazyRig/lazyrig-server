@@ -19,7 +19,7 @@ STREAM_JOB_EVENTS = {'text', 'progress', 'enhancement_progress'}
 STREAM_JOB_FIELDS = {'status', 'phase', 'updated', 'context', 'timings', 'progress',
                      'thinking_open', 'reasoning_incomplete'}
 SUMMARY_FIELDS = {'id', 'kind', 'model', 'status', 'phase', 'created', 'updated',
-                  'context', 'timings', 'progress', 'error', 'artifacts', 'placement_plan', 'placement_attempts'}
+                  'context', 'timings', 'progress', 'error', 'artifacts', 'placement_plan', 'placement_attempts', 'reload_models'}
 LOGGER = logging.getLogger('lazyrig.runtime')
 
 

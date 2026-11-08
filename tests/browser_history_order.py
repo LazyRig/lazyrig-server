@@ -89,7 +89,8 @@ def main():
                 page.goto('http://127.0.0.1:' + str(server.server_port))
                 expect(page.locator('#connection')).to_have_text('Server online')
                 page.locator('nav [data-view="chat"]').click()
-                page.locator('#chat-history-toggle').click()
+                if not page.locator('#chat-history').is_visible():
+                    page.locator('#chat-history-toggle').click()
                 send('Alpha conversation')
                 alpha = active_id()
                 page.locator('#chat-new').click()
@@ -177,7 +178,8 @@ def main():
 
                 def remove_folder(folder):
                     manage(folder)
-                    page.once('dialog', lambda dialog: dialog.accept())
+                    page.locator('#chat-folder-remove-start').click()
+                    page.locator('#chat-folder-delete-conversations').uncheck()
                     page.locator('#chat-folder-remove').click()
                     expect(page.locator('#chat-folder-dialog')).not_to_be_visible()
 
@@ -230,14 +232,15 @@ def main():
                 page.reload()
                 expect(page.locator('#connection')).to_have_text('Server online')
                 page.locator('nav [data-view="chat"]').click()
-                page.locator('#chat-history-toggle').click()
+                if not page.locator('#chat-history').is_visible():
+                    page.locator('#chat-history-toggle').click()
                 expect(page.locator(f'[data-folder="{wardrobe}"] [data-thread="{beta}"]')).to_be_visible()
                 check('Drag destination, selected conversation and draft survive reload',
                       [records('memberships')[beta]['folderId'], active_id(), page.locator('#chat-prompt').input_value()],
                       [wardrobe, alpha, 'Keep this draft while organizing'])
                 manage(wardrobe)
                 check('Folder dialog uses compact action text',
-                      page.locator('#chat-folder-dialog .actions .close-dialog').evaluate('button => getComputedStyle(button).fontSize'), '14px')
+                      page.locator('#chat-folder-dialog .actions .close-dialog').evaluate('button => getComputedStyle(button).fontSize'), '13px')
                 page.locator('#chat-folder-form [name="folder_name"]').fill('Outfits')
                 page.locator('#chat-folder-submit').click()
                 expect(page.locator('#chat-folder-dialog')).not_to_be_visible()
@@ -249,7 +252,8 @@ def main():
                 page.reload()
                 expect(page.locator('#connection')).to_have_text('Server online')
                 page.locator('nav [data-view="chat"]').click()
-                page.locator('#chat-history-toggle').click()
+                if not page.locator('#chat-history').is_visible():
+                    page.locator('#chat-history-toggle').click()
                 expect(page.locator(f'[data-folder-toggle="{wardrobe}"]')).to_have_attribute('aria-expanded', 'false')
                 expect(page.locator(f'[data-thread="{beta}"]')).not_to_be_visible()
                 check('Reload preserves folders and collapse state',
@@ -280,7 +284,8 @@ def main():
                       {key: None for key in folder_timestamps})
 
                 page.locator('nav [data-view="chat"]').click()
-                page.locator('#chat-history-toggle').click()
+                if not page.locator('#chat-history').is_visible():
+                    page.locator('#chat-history-toggle').click()
                 select(alpha)
                 actions = page.locator(f'[data-thread-menu="{beta}"]')
                 actions.click()
@@ -309,6 +314,8 @@ def main():
 
                 # The same compact menu stays inside a phone-sized viewport.
                 page.set_viewport_size({'width': 390, 'height': 844})
+                expect(page.locator('#chat-history')).not_to_be_visible()
+                page.locator('#chat-history-toggle').click()
                 page.locator(f'[data-thread-menu="{alpha}"]').click()
                 rect = page.locator('#chat-thread-menu').bounding_box()
                 check('Conversation actions fit the mobile viewport',

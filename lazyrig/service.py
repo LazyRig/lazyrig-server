@@ -9,6 +9,8 @@ from pathlib import Path
 from . import __version__
 from .config import validate, restore_settings
 from .context import DEFAULT_OUTPUT_TOKENS, TokenizerService, context_info
+from .compaction import (ContextCompactor, CompactionError, settings as compaction_settings,
+                         enabled as compaction_enabled, is_context_overflow)
 from .chat_images import capture_sources, image_tools, parse_action
 from .prompt_enhancement import enabled as enhancement_enabled, run as enhance_image_prompt
 from .scheduler import Scheduler, PlacementAdmissionError
@@ -42,6 +44,8 @@ TERMINAL = {"completed", "failed", "cancelled", "interrupted"}
 def _record_failure(job, exc):
     """Use the same saved diagnostics for explicit Load and generation jobs."""
     job.update(status='failed', phase='Failed', error=str(exc) or type(exc).__name__)
+    if isinstance(exc, CompactionError):
+        job['error_code'] = exc.code
     if getattr(exc, 'worker_diagnostics', None):
         job['worker_diagnostics'] = copy.deepcopy(exc.worker_diagnostics)
     if isinstance(exc, WorkerProcessError):
@@ -93,6 +97,7 @@ class Service:
             self.scheduler = Scheduler(self.config, **({"worker_factory": worker_factory} if worker_factory else {}))
             self.images = ImageStore(self.store.directory)
             self.tokens = tokenizer_factory(self.config["mode"], self.images)
+            self.compactor = ContextCompactor(self.tokens)
             logging.getLogger('lazyrig.runtime').info('Startup: detecting OpenVINO runtime and devices...')
             self.detected = self.discover()
             self.downloads = DownloadManager(self)
@@ -202,7 +207,7 @@ class Service:
                 # token IDs or conversation histories. Full records stay at /jobs/ID.
                 fields = {'id', 'kind', 'model', 'status', 'phase', 'created', 'updated',
                           'context', 'timings', 'progress', 'error', 'artifacts', 'durable', 'storage_error',
-                          'placement_plan', 'placement_attempts'}
+                          'placement_plan', 'placement_attempts', 'reload_models'}
                 jobs = [{**{k: v for k, v in j.items() if k in fields},
                          'prompt': j.get('prompt', '')[:160],
                          'request': {k: v for k, v in j.get('request', {}).items()
@@ -217,7 +222,7 @@ class Service:
                     "models": models, "hardware": self.detected,
                     "runtime_controls": copy.deepcopy(CONTROLS),
                     "sampling_presets": copy.deepcopy(QWEN_PRESETS),
-                    "server": {**{k: self.config.get(k) for k in ("host", "port", "models_dir", "load_timeout_seconds", "request_timeout_seconds", "download_max_gib", "allowed_origins", "tls_cert", "tls_key", "browser_access", "terminal_metrics", "max_jobs", "max_preparing", "max_connections", "http_timeout_seconds", "public_base_url", "min_free_disk_mib", "event_retention_days")},
+                    "server": {**{k: self.config.get(k) for k in ("host", "port", "models_dir", "load_timeout_seconds", "request_timeout_seconds", "download_max_gib", "allowed_origins", "tls_cert", "tls_key", "browser_access", "terminal_metrics", "max_jobs", "max_preparing", "max_connections", "http_timeout_seconds", "public_base_url", "min_free_disk_mib", "event_retention_days", "context_compaction")},
                                "connection_errors": copy.deepcopy(getattr(self, "connection_errors", [])),
                                "api_key_set": bool(self.config.get("api_key")), "inference_api_key_set": bool(self.config.get("inference_api_key")), "restart_required": getattr(self, "restart_required", False)},
                     "downloads": self.downloads.snapshot(),
@@ -279,12 +284,40 @@ class Service:
             validate(candidate)
             if mid and candidate["mode"] == "openvino":
                 ensure_mtp_export(m)
-            self.scheduler.reconfigure(candidate, lambda *args, **kwargs: None)
+            previous_residents = {key: copy.deepcopy(value[0]) for key, value in self.scheduler.resident.items()}
+            changes = []
+            self.scheduler.reconfigure(candidate, lambda kind, **data: changes.append((kind, data)))
             self.config = candidate
             self.scheduler.config = candidate
             self.tokens.tokenizers.clear()
             self._persist()
-        return self.state()
+            # Reload only workers invalidated by construction settings. Memory
+            # policy evictions must stay evicted; reloading them can thrash peers.
+            reload_ids = list(dict.fromkeys(data['model'] for kind, data in changes if kind == 'unloaded'
+                              and (data.get('reason', '').startswith('load-time settings changed:')
+                                   or data.get('reason') == 'CPU device inference threads changed')))
+            reload_job = None
+            if reload_ids:
+                reload_models = []
+                for key in reload_ids:
+                    model = self.model(key)
+                    if '_image_operation' in previous_residents[key]:
+                        model['_image_operation'] = previous_residents[key]['_image_operation']
+                    reload_models.append(model)
+                job = self._new_job(None, reload_ids[0], 'Apply saved model settings', {'action': 'reload'})
+                job.update(kind='reload', phase='Waiting to reload model', reload_models=reload_ids)
+                def reload(cancel, emit):
+                    for kind, data in changes:
+                        emit(kind, **data)
+                    for model in reload_models:
+                        with self.scheduler.lease_models([model], cancel):
+                            self.scheduler.ensure(model, cancel, emit)
+                reload_job = self._launch(job, reload)
+            result = self.state()
+            result['settings_effects'] = {'reload_job_id': reload_job['id'] if reload_job else None,
+                                         'reloading_models': reload_ids,
+                                         'unloaded_models': [data['model'] for kind, data in changes if kind == 'unloaded']}
+            return result
 
     def _persist(self):
         temp = self.settings_path.with_suffix(".tmp")
@@ -296,7 +329,7 @@ class Service:
             raise ValueError("Global image routing settings were removed. Select an image tool per chat or use the image endpoints.")
         with self.lock:
             candidate = copy.deepcopy(self.config)
-            for key in ("host", "port", "models_dir", "load_timeout_seconds", "request_timeout_seconds", "download_max_gib", "api_key", "inference_api_key", "allowed_origins", "tls_cert", "tls_key", "browser_access", "terminal_metrics", "max_jobs", "max_preparing", "max_connections", "http_timeout_seconds", "public_base_url", "min_free_disk_mib", "event_retention_days"):
+            for key in ("host", "port", "models_dir", "load_timeout_seconds", "request_timeout_seconds", "download_max_gib", "api_key", "inference_api_key", "allowed_origins", "tls_cert", "tls_key", "browser_access", "terminal_metrics", "max_jobs", "max_preparing", "max_connections", "http_timeout_seconds", "public_base_url", "min_free_disk_mib", "event_retention_days", "context_compaction"):
                 if key in body:
                     candidate[key] = body[key]
             validate(candidate)
@@ -693,6 +726,7 @@ class Service:
             return self._submit_reserved(body, reservation, captured, background, retry_identity, request_id)
 
     def _submit_reserved(self, body, reservation, captured=False, background=True, retry_identity=None, request_id=None):
+        compaction_enabled(self.config, body)
         sid = body["session_id"]
         history = self.store.messages(sid)
         with self.lock:
@@ -731,6 +765,9 @@ class Service:
         if applied_mtp["enabled"]:
             job["generation"]["num_assistant_tokens"] = applied_mtp["num_assistant_tokens"]
         job["external"] = body.get("external", False)
+        job["auto_compact"] = body.get("auto_compact", True)
+        job["compaction_settings"] = compaction_settings(self.config)
+        job["compaction_settings"]["enabled"] = compaction_enabled(self.config, body)
         job["tools"] = body.get("tools")
         job["template_context"] = prompt_model["template_context"]
         job["response_format"] = prompt_model["response_format"]
@@ -872,6 +909,55 @@ class Service:
             job["updated"] = time.time()
             self.store.save_job(job)
 
+        def summarize(prepared, summary_budget, remaining):
+            nonlocal active_model, text_completed
+            cancelled.check()
+            if cancelled.is_set():
+                raise Cancelled()
+            text_completed = False
+            active_model = llm['id']
+            job.update(status='running', phase='Compacting context')
+            save()
+            emit('compaction_started', input_tokens=prepared['context']['input_tokens'])
+            started = time.monotonic()
+            worker = self.scheduler.ensure(llm, cancelled, emit)
+            remaining -= time.monotonic() - started
+            if remaining <= 0:
+                raise CompactionError('Automatic context compaction timed out while loading the model.')
+            job['phase'] = 'Compacting context'
+            save()
+            result = None
+            for item in worker.run({'action': 'text', 'prepared': prepared, 'tools_enabled': False,
+                                    'force_image': False, 'max_tokens': summary_budget,
+                                    'temperature': 0, 'generation': {'temperature': 0},
+                                    'response_format': {'type': 'text'}, 'timings_per_token': False},
+                                   cancelled.remaining(remaining), cancelled):
+                if item['kind'] == 'result':
+                    result = item
+            if result is None:
+                raise CompactionError('The compaction model returned no result. The original conversation is intact.')
+            text_completed = True
+            parts = split_reasoning(result.get('text', ''), prepared.get('thinking_open', False), final=True)
+            if (parts.get('reasoning_incomplete') or result.get('generated_tokens', 0) >= summary_budget
+                    or result.get('finish_reason') == 'length'):
+                raise CompactionError('The summary reached its output limit. Increase Summary tokens in server settings. '
+                                      'The original conversation is intact.')
+            return parts['content'], {'prompt_tokens': result.get('input_tokens', prepared['context']['input_tokens']),
+                                      'completion_tokens': result.get('generated_tokens', 0)}
+
+        def prepare_context(rows, model=prompt_model, tools=None, initial=None, force=False):
+            compacted, prepared, details = self.compactor.prepare(
+                model, rows, budget, tools=tools, add_system=not job.get('external', False),
+                options=job['compaction_settings'], summarize=summarize, initial=initial, force=force)
+            if details['applied']:
+                job.setdefault('compaction_passes', []).append(details)
+                job['compaction'] = details
+                prepared['context']['compaction'] = details
+                emit('context_compacted', **details)
+            job['context'] = prepared['context']
+            save()
+            return compacted, prepared
+
         def text_pass(prepared, tools_enabled, force_image=False, resuming=False, stage="initial"):
             nonlocal active_model, text_completed
             text_completed = False
@@ -910,6 +996,8 @@ class Service:
                     job["context"] = context_info(int(count), int(llm["context_limit"]), budget,
                         item["generated_tokens"], accuracy, prompt_sha256=ci["prompt_sha256"],
                         template_context=job["current_template_context"], template_notes=job["template_notes"])
+                    if job.get('compaction'):
+                        job['context']['compaction'] = job['compaction']
                     if prepared.get("images"):
                         job["context"].update(image_count=len(prepared["images"]), visual_tokens_included=item.get("input_tokens") is not None)
                         if item.get("input_tokens") is None:
@@ -941,19 +1029,31 @@ class Service:
                 raise Cancelled()
             return result["text"]
 
+        def guarded_text_pass(rows, prepared, tools_enabled, *, context_tools=None, **kwargs):
+            # One recovery only, before any response text/tool call was exposed.
+            # Native multimodal counts can exceed the text-only preflight count.
+            try:
+                return rows, prepared, text_pass(prepared, tools_enabled, **kwargs)
+            except NativeWorkerError as exc:
+                if (not job['compaction_settings']['enabled'] or job.get('context_overflow_retry')
+                        or job.get('text') or not is_context_overflow(exc)
+                        or cancelled.cancelled or cancelled.expired):
+                    raise
+                job['context_overflow_retry'] = True
+                self.scheduler.unload(llm['id'], emit, reason='context overflow recovery')
+                rows, prepared = prepare_context(rows, tools=context_tools, force=True)
+                emit('context_overflow_retry', attempt=1)
+                return rows, prepared, text_pass(prepared, tools_enabled, **kwargs)
+
         try:
             models = [llm] + ([image] if image else [])
             with self.scheduler.lease_models(models, cancelled):
                 try:
                     history = history + [job.get("input_message", {"role": "user", "content": job["prompt"]})]
-                    prepared = initial_prepared or self.tokens.prepare(prompt_model, history, budget, image is not None,
-                        tools=job.get("tools"), add_system=not job.get("external", False))
-                    job["context"] = prepared["context"]
-                    save()
-                    if prepared["context"]["fits"] is False:
-                        raise ValueError("Context overflow: input plus output budget exceeds the configured limit. Nothing was truncated.")
-                    self.store.append(job["session_id"], history[-1])
-                    first = text_pass(prepared, image is not None)
+                    input_message = history[-1]
+                    history, prepared = prepare_context(history, tools=job.get('tools'), initial=initial_prepared)
+                    self.store.append(job["session_id"], input_message)
+                    history, prepared, first = guarded_text_pass(history, prepared, image is not None, context_tools=job.get('tools'))
                     if not image and job.get('tools'):
                         try:
                             parse_tool_calls(first, job['tools'], job.get('thinking_open', False))
@@ -996,9 +1096,7 @@ class Service:
                                     retry_history[0]["content"] += "\n\n" + instruction
                                 else:
                                     retry_history.insert(0, {"role": "system", "content": instruction})
-                                prepared = self.tokens.prepare(retry_model, retry_history, budget, True, tools=job['tools'], add_system=False)
-                                if prepared["context"]["fits"] is False:
-                                    raise ValueError("The incomplete tool response could not be retried within the context limit. No image was generated.") from exc
+                                retry_history, prepared = prepare_context(retry_history, model=retry_model, tools=job['tools'])
                                 emit("tool_retry", attempt=2, reason=exc.code, max_tokens=budget, enable_thinking=False)
                                 first = text_pass(prepared, True, stage="retry")
                     if not tool:
@@ -1078,18 +1176,14 @@ class Service:
                              **({} if reused else {'cache_preserved': False}))
                         job["phase"] = "Image saved; resuming chat model" if reused else "Image saved; restoring chat model"
                         save()
-                        prepared = self.tokens.prepare(prompt_model, history, budget, False, add_system=not job.get("external", False))
-                        job["context"] = prepared["context"]
-                        save()
-                        if prepared["context"]["fits"] is False:
-                            raise ValueError("Image was saved, but its tool result exceeds the remaining context budget")
-                        response = text_pass(prepared, False, resuming=True, stage="continuation")
+                        history, prepared = prepare_context(history)
+                        history, prepared, response = guarded_text_pass(history, prepared, False, resuming=True, stage="continuation")
                         self.store.append(job["session_id"], assistant_message(response, prepared.get("thinking_open", False)))
                 except BaseException as exc:
                     # Rejected model output is a request failure, not a native
                     # worker failure. Client tools are never executed here; a
                     # corrected request can reuse the completed text worker.
-                    validation_error = isinstance(exc, (ToolCallError, ResponseFormatError))
+                    validation_error = isinstance(exc, (ToolCallError, ResponseFormatError, CompactionError))
                     if validation_error:
                         job['error_code'] = exc.code
                     retain = (validation_error and text_completed and active_model == llm['id']

@@ -5,6 +5,7 @@ import re
 import ssl
 import time
 from .context import DEFAULT_OUTPUT_TOKENS, IMAGE_TOOL
+from .compaction import enabled as compaction_enabled, preflight as compaction_preflight
 from .service import TERMINAL
 from .admission import keyed
 from .deadlines import DeadlineEvent, current_deadline
@@ -44,7 +45,7 @@ def validate_chat(service, body, preflight=True, origin=''):
     allowed = {"model", "messages", "stream", "stream_options", "max_tokens", "max_completion_tokens", "temperature",
                *SAMPLING_FIELDS, "seed", "stop", "tools", "tool_choice", "n", "user",
                "auto_image", "image_model", "image_sources", "enhance_prompt", "width", "height", "steps", "image_seed",
-               "chat_template_kwargs", "reasoning_effort", "timings_per_token", "response_format", "num_assistant_tokens"}
+               "chat_template_kwargs", "reasoning_effort", "timings_per_token", "response_format", "num_assistant_tokens", "auto_compact"}
     extra = set(body) - allowed
     if extra:
         raise ValueError("Unsupported request fields: " + ", ".join(sorted(extra)))
@@ -56,6 +57,7 @@ def validate_chat(service, body, preflight=True, origin=''):
         raise ValueError("stream_options accepts only include_usage")
     if body.get("tool_choice", "auto") not in ("auto", "none"):
         raise ValueError("tool_choice supports auto or none")
+    compaction_enabled(service.config, body)  # Validate the optional per-request override.
     messages = body.get("messages")
     model = service.model(body["model"], "text-generation")
     check_messages(messages, model)
@@ -102,8 +104,8 @@ def validate_chat(service, body, preflight=True, origin=''):
     if preflight:
         captured, sources, prepared_tools = chat_inputs(service, body, model, auto, image_model, tools, origin)
         prepared = service.tokens.prepare(prompt_model, captured, budget, auto, tools=prepared_tools, add_system=False)
-    if prepared and prepared["context"]["fits"] is False:
-        raise ValueError("Context overflow: prepared input plus output budget exceeds configured context limit")
+    if prepared:
+        compaction_preflight(service.config, body, prepared, captured)
     return model, tools, auto, image_model, generation, budget, prepared
 
 def chat_inputs(service, body, model, auto, image_model, tools=None, origin=''):
@@ -132,8 +134,7 @@ def _start_chat(service, body, preflight, background, origin, retry_identity=Non
     messages, sources, tools = chat_inputs(service, body, model, auto, image_model, tools, origin)
     if preflight:
         prepared = service.tokens.prepare(template_model(model, body), messages, budget, auto, tools=tools, add_system=False)
-        if prepared["context"]["fits"] is False:
-            raise ValueError("Context overflow: prepared input plus output budget exceeds configured context limit")
+        compaction_preflight(service.config, body, prepared, messages)
     if current_deadline() is not None:
         current_deadline().check()
     with service.lock:
@@ -146,7 +147,7 @@ def _start_chat(service, body, preflight, background, origin, retry_identity=Non
     image_defaults = service.model(image_model).get("generation", {}) if auto else {}
     return service.submit({**generation, "session_id": sid, "model": model["id"], "prompt": text_content(messages[-1]["content"]) or "[Image input]",
         **{k: body[k] for k in ("chat_template_kwargs", "reasoning_effort", "timings_per_token", "response_format") if k in body},
-        "input_message": messages[-1], "external": True, "tools": tools, "tools_enabled": auto, "image_model": image_model,
+        "input_message": messages[-1], "external": True, "auto_compact": body.get("auto_compact", True), "tools": tools, "tools_enabled": auto, "image_model": image_model,
         "image_sources": sources, "enhance_prompt": enhancement_enabled(body),
         "image_size_explicit": 'width' in body or 'height' in body,
         "max_tokens": budget, "width": body.get("width", image_defaults.get("width", 512)), "height": body.get("height", image_defaults.get("height", 512)),
@@ -178,7 +179,7 @@ def completion(job, body):
             "model": job["model"], "choices": [{"index": 0, "message": message, "finish_reason": reason}],
             "usage": job.get("usage", {"prompt_tokens": ci.get("input_tokens", 0), "completion_tokens": ci.get("generated_tokens", 0),
                       "total_tokens": ci.get("used_tokens", 0)}),
-            "x_context": ci, "x_job_id": job["id"], "x_artifacts": job["artifacts"], "x_mode": job["mode"],
+            "x_compaction": job.get("compaction"), "x_context": ci, "x_job_id": job["id"], "x_artifacts": job["artifacts"], "x_mode": job["mode"],
             "x_durable": job.get('durable', True), "x_storage_warning": job.get('storage_error'),
             "x_tool_attempts": len(job.get("tool_attempts", [])),
             "x_template_context": job.get("current_template_context", {}),
@@ -204,7 +205,7 @@ def wait_job(service, jid, image_ready=False, handler=None):
 def job_receipt(job, origin=''):
     result = {"object": "inference.job", "id": job["id"], "x_job_id": job["id"], "model": job["model"],
             "status": job["status"], "phase": job.get("phase"), "progress": job.get("progress"),
-            "x_context": job.get("context"), "x_artifacts": job.get("artifacts", []),
+            "x_compaction": job.get("compaction"), "x_context": job.get("context"), "x_artifacts": job.get("artifacts", []),
             "x_image_recovery": job.get('image_recovery'),
             "x_result_ready": bool(job.get('result_ready') or (job.get('kind') == 'image' and job.get('artifacts'))),
             "x_warning": job.get('error'),
@@ -236,7 +237,7 @@ def job_error(job):
 def job_error_status(job):
     # A cancelled result is permanently unavailable. 5xx (and some SDKs' 409
     # handling) invites automatic retries of a request the user just stopped.
-    return 410 if job['status'] == 'cancelled' else 504 if job.get('error_code') == 'request_timeout' else 502 if job.get('error_code') else 500
+    return 400 if job.get('error_code') == 'context_length_exceeded' else 410 if job['status'] == 'cancelled' else 504 if job.get('error_code') == 'request_timeout' else 502 if job.get('error_code') else 500
 
 
 def serve_job_result(handler, service, jid):
@@ -343,7 +344,7 @@ def serve_chat(handler, service, body, asynchronous=False):
                        x_durable=result['x_durable'], x_storage_warning=result['x_storage_warning'],
                        x_template_context=result["x_template_context"], x_template_notes=result["x_template_notes"],
                        x_prompt_enhancement=result['x_prompt_enhancement'],
-                       x_image_recovery=result['x_image_recovery'],
+                       x_image_recovery=result['x_image_recovery'], x_compaction=result['x_compaction'],
                        x_reasoning_incomplete=result["x_reasoning_incomplete"], x_response_format=result["x_response_format"], x_mtp=result["x_mtp"], x_sampling=result['x_sampling'],
                        **({"x_json_valid": result["x_json_valid"]} if "x_json_valid" in result else {}),
                        **({"x_timing_passes": result["x_timing_passes"]} if job.get("timings_per_token") else {})))

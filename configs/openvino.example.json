@@ -14,5 +14,14 @@
   "request_timeout_seconds": 3600,
   "devices": [],
   "models": [],
-  "terminal_metrics": true
+  "terminal_metrics": true,
+  "context_compaction": {
+    "enabled": true,
+    "threshold": 0.75,
+    "target_ratio": 0.2,
+    "protect_first_n": 3,
+    "protect_last_n": 20,
+    "summary_max_tokens": 2048,
+    "timeout_seconds": 1800
+  }
 }

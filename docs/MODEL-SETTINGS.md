@@ -514,3 +514,14 @@ and waiting for a future request. Changing output dimensions alone does not
 reload a compatible worker. Explicit
 **Keep loaded between requests** and **Unload after each request** remain
 available. Manual unload, timeouts, failures and pipeline changes still apply.
+
+
+## Applying saved settings
+
+In v0.41, saving settings automatically reloads an already loaded model when pipeline, export path, device/placement, runtime plugin, KV-cache scheduler, MTP construction settings or image scheduler changes require it. The model row shows reload progress; Recent activity records success or failure. An image worker retains its generation/edit operation through a reload.
+
+Display name, sampling defaults, template flags and context/output budgets apply immediately to later requests without restarting a compatible worker. A model that is currently unloaded remains unloaded. Disabling a model unloads it. Device budget changes can evict models, and do not reload evicted workers just to exceed the same budget again. Save model settings after current jobs finish.
+
+Client requests can override output tokens. For example, LazyRig Bench Quality's default 4,096-token budget takes precedence over a saved 65,536-token model default. Raise the budget in the client when that is the intended evaluation protocol.
+
+[Automatic context compaction](CONTEXT-COMPACTION.md) protects the input context. It does not increase the requested output allowance or detect repetitive reasoning.

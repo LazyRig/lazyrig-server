@@ -3,7 +3,7 @@
 // the server; reconnecting never submits a second generation request.
 window.Chat = (() => {
   const uuid=()=>Array.from(crypto.getRandomValues(new Uint8Array(16)),x=>x.toString(16).padStart(2,'0')).join('');
-  const threads=new Map(), folders=new Map(), watching=new Map(), images=new Map();
+  const threads=new Map(), folders=new Map(), watching=new Map(), images=new Map(), deletingThreads=new Set();
   let db, folderDb, current, selectedFolder=null, ready=false, selecting=false, pendingSelection=null, readingFiles=0, files=[], attachmentVersion=0, modelSignature='', renderPending=false;
   const wait=ms=>new Promise(resolve=>setTimeout(resolve,ms));
   const options=()=>$('#chat-options');
@@ -42,7 +42,7 @@ window.Chat = (() => {
   }
   // Saving a draft, a setting or streamed output does not change history order.
   // Recency belongs to a new conversation or an explicitly submitted user turn.
-  async function save(t=active()){if(!t||!db)return;await transaction('readwrite',store=>store.put(structuredClone(t)));}
+  async function save(t=active()){if(!t||!db||threads.get(t.id)!==t||deletingThreads.has(t.id))return;await transaction('readwrite',store=>store.put(structuredClone(t)));}
   async function initialize(){
     storageStatus('Opening saved conversations…');
     try{db=await openDatabase('lazyrig-chat',['threads']);folderDb=await openDatabase('lazyrig-chat-folders',['folders','memberships','metadata']);const storedThreads=await transaction('readonly',store=>store.getAll());await importLegacyFolders(storedThreads);for(const f of await transaction('readonly',store=>store.getAll(),'folders'))folders.set(f.id,f);const memberships=new Map((await transaction('readonly',store=>store.getAll(),'memberships')).map(m=>[m.id,m.folderId]));for(const t of storedThreads){try{const draft=JSON.parse(localStorage.getItem('lazyrig.draft.'+t.id)||'null');if(draft)Object.assign(t,draft);}catch{}if(memberships.has(t.id))t.folderId=memberships.get(t.id);threads.set(t.id,t);}ready=true;
@@ -62,13 +62,11 @@ window.Chat = (() => {
     const folder=newChatFolder(),button=$('#chat-new');
     button.title=folder?`New chat in folder “${folder.name}”`:'New chat outside folders';
     button.setAttribute('aria-label',button.title);
-    const compact=$('#chat-new-compact');compact.title=button.title;compact.setAttribute('aria-label',button.title);
     updateChatHeading();
   }
-  async function newChat({title='New conversation',task=$('#chat-task').value||'chat',model=$('#chat-model').value,messages=[]}={}){
+  async function newChat({title='New conversation',task=$('#chat-task').value||'chat',model=$('#chat-model').value,messages=[],folderId=newChatFolder()?.id||null,source=null}={}){
     $('#chat-history-search').value='';
-    const folderId=newChatFolder()?.id||null;
-    const t={id:uuid(),title,created:Date.now(),updated:Date.now(),folderId,task,model,settings:{},messages,draft:''};
+    const t={id:uuid(),title,created:Date.now(),updated:Date.now(),folderId,task,model,settings:{},messages,draft:'',source};
     threads.set(t.id,t);select(t.id);await save(t);
     await transaction('readwrite',store=>store.put({id:t.id,folderId}),'memberships');$('#chat-prompt').focus();
     return t;
@@ -204,9 +202,9 @@ window.Chat = (() => {
     menu.style.top=Math.max(8,Math.min(rect.bottom+4,innerHeight-menu.offsetHeight-8))+'px';
     menu.querySelector('button:not([hidden])').focus({preventScroll:true});
   }
-  let historyDialogAction,historyDialogId;
+  let historyDialogAction,historyDialogId,confirmingHistoryRemoval=false,removingHistoryFolder=false;
   function openHistoryDialog(action,id=null){
-    if(!ready)return;historyDialogAction=action;historyDialogId=id;
+    if(!ready||removingHistoryFolder)return;historyDialogAction=action;historyDialogId=id;
     const folder=folders.get(id),moving=action==='move',editing=action==='edit';
     const dialog=$('#chat-folder-dialog'),form=$('#chat-folder-form');form.reset();
     $('#chat-folder-title').textContent=moving?'Move conversation':editing?'Manage folder':'Add folder';
@@ -214,33 +212,71 @@ window.Chat = (() => {
     $('#chat-folder-destination-label').hidden=!moving;
     form.elements.folder_id.innerHTML='<option value="">No folder</option>'+orderedFolders().map(f=>`<option value="${f.id}">${esc(f.name)}</option>`).join('');
     form.elements.folder_id.value=(moving?threadFolder(threads.get(id)):null)||'';
-    $('#chat-folder-remove').hidden=!editing;$('#chat-folder-submit').textContent=moving?'Move':editing?'Save':'Add';
-    $('#chat-folder-note').textContent=editing?'Removing a folder returns its conversations to the normal list.':'Folders organize conversations saved in this browser.';
+    $('#chat-folder-submit').textContent=moving?'Move':editing?'Save':'Add';
+    $('#chat-folder-note').hidden=editing;$('#chat-folder-note').textContent='Folders organize conversations saved in this browser.';
+    setFolderRemovalStep(false,false);
     dialog.showModal();(moving?form.elements.folder_id:form.elements.folder_name).focus();
+  }
+  function setFolderRemovalStep(confirming,focus=true){
+    if(removingHistoryFolder||confirming&&historyDialogAction!=='edit')return;
+    confirmingHistoryRemoval=confirming;
+    const editing=historyDialogAction==='edit',moving=historyDialogAction==='move',folder=folders.get(historyDialogId);
+    const count=[...threads.values()].filter(t=>threadFolder(t)===folder?.id).length;
+    $('#chat-folder-dialog').classList.toggle('confirming-removal',confirming);
+    $('#chat-folder-title').textContent=confirming?'Remove folder?':moving?'Move conversation':editing?'Manage folder':'Add folder';
+    $('#chat-folder-summary').textContent=confirming?folder?.name||'':editing?`${count} conversation${count===1?'':'s'}`:moving?'Choose where to keep this conversation.':'Keep related conversations together.';
+    $('#chat-folder-symbol').innerHTML=UI.icon(confirming?'trash':'folder');
+    $('#chat-folder-fields').hidden=confirming;$('#chat-folder-submit').hidden=confirming;
+    $('#chat-folder-delete-option').hidden=$('#chat-folder-remove').hidden=$('#chat-folder-back').hidden=!confirming;
+    $('#chat-folder-remove-start').hidden=!editing||confirming;
+    // Hidden name validation must not prevent keyboard use of the removal step.
+    $('#chat-folder-form').elements.folder_name.required=!moving&&!confirming;
+    updateFolderRemovalNote();
+    if(focus)(confirming?$('#chat-folder-back'):$('#chat-folder-form').elements.folder_name).focus();
+  }
+  function updateFolderRemovalNote(){
+    const folder=folders.get(historyDialogId),count=[...threads.values()].filter(t=>threadFolder(t)===folder?.id).length;
+    $('.folder-removal-switch').hidden=!count;
+    $('#chat-folder-removal-note').textContent=!count?'This folder is empty. Only the folder will be removed.':$('#chat-folder-delete-conversations').checked?`${count} conversation${count===1?'':'s'} will be deleted. This cannot be undone.`:`${count} conversation${count===1?'':'s'} will be kept in the main history list.`;
   }
   async function saveHistoryDialog(event){
     event.preventDefault();const form=event.target;
+    if(removingHistoryFolder||confirmingHistoryRemoval)return;
     try{
       if(historyDialogAction==='move'){
         await moveThread(historyDialogId,form.elements.folder_id.value||null);
       }else{
         const name=form.elements.folder_name.value.trim();if(!name)throw new Error('Enter a folder name.');
         const original=folders.get(historyDialogId),id=historyDialogAction==='edit'?historyDialogId:uuid();
-        const next={id,name,collapsed:original?.collapsed||false};
+        const next={...original,id,name,collapsed:original?.collapsed||false};
         await transaction('readwrite',store=>store.put(next),'folders');folders.set(id,next);if(historyDialogAction==='create')selectFolder(id);
       }
       $('#chat-folder-dialog').close();renderThreads();
     }catch(e){toast(e.message);}
   }
   async function removeHistoryFolder(){
-    const folder=folders.get(historyDialogId);if(!folder)return;
-    if(!confirm(`Remove “${folder.name}”? Its conversations will stay in your history.`))return;
-    const moved=[...threads.values()].filter(t=>threadFolder(t)===folder.id);
+    const folder=folders.get(historyDialogId);if(!folder||removingHistoryFolder||!confirmingHistoryRemoval)return;
+    const members=[...threads.values()].filter(t=>threadFolder(t)===folder.id),deleteConversations=$('#chat-folder-delete-conversations').checked;
+    if(deleteConversations&&members.some(pending)){toast('Stop or finish active conversations in this folder before deleting them.');return;}
+    removingHistoryFolder=true;$('#chat-folder-delete-conversations').disabled=$('#chat-folder-remove').disabled=$('#chat-folder-submit').disabled=true;
     try{
-      await new Promise((resolve,reject)=>{const tx=folderDb.transaction(['folders','memberships'],'readwrite');tx.objectStore('folders').delete(folder.id);for(const t of moved)tx.objectStore('memberships').put({id:t.id,folderId:null});tx.oncomplete=resolve;tx.onerror=tx.onabort=()=>reject(tx.error||new Error('Could not remove folder'));});
-      for(const t of moved){t.folderId=null;await save(t).catch(storageError);}
+      if(deleteConversations&&members.length){
+        for(const t of members)deletingThreads.add(t.id);
+        // Commit all conversation removals together before removing the folder.
+        // Late draft/stream callbacks must not recreate a removed conversation.
+        await new Promise((resolve,reject)=>{const tx=db.transaction('threads','readwrite');for(const t of members)tx.objectStore('threads').delete(t.id);tx.oncomplete=resolve;tx.onerror=tx.onabort=()=>reject(tx.error||new Error('Could not delete folder conversations'));});
+        for(const t of members){threads.delete(t.id);try{localStorage.removeItem('lazyrig.draft.'+t.id);}catch(e){storageError(e);}}
+      }
+      await new Promise((resolve,reject)=>{const tx=folderDb.transaction(['folders','memberships'],'readwrite');tx.objectStore('folders').delete(folder.id);for(const t of members){if(deleteConversations)tx.objectStore('memberships').delete(t.id);else tx.objectStore('memberships').put({id:t.id,folderId:null});}tx.oncomplete=resolve;tx.onerror=tx.onabort=()=>reject(tx.error||new Error('Could not remove folder'));});
+      if(!deleteConversations)for(const t of members){t.folderId=null;await save(t).catch(storageError);}
       folders.delete(folder.id);if(selectedFolder===folder.id)selectFolder(null);$('#chat-folder-dialog').close();renderThreads();
-    }catch(e){storageError(e);}
+    }catch(e){toast(e.message);}
+    finally{
+      for(const t of members)deletingThreads.delete(t.id);
+      removingHistoryFolder=false;$('#chat-folder-delete-conversations').disabled=$('#chat-folder-remove').disabled=$('#chat-folder-submit').disabled=false;
+      if(!threads.has(current)){const next=[...threads.values()].sort(recentFirst)[0];if(next)select(next.id);else await newChat({folderId:null}).catch(storageError);}
+      renderThreads();updateFolderRemovalNote();
+    }
   }
   function updateModels(preferredModel=''){
     if(!state)return;if(pendingSelection){const id=pendingSelection;pendingSelection=null;select(id);return;}const task=$('#chat-task').value;
@@ -280,7 +316,7 @@ window.Chat = (() => {
     if(!attach&&files.length){attachmentVersion++;files=[];renderFiles();}
     if(active()&&state&&!selecting){active().task=task;active().model=model?.id||'';checkpoint();save().catch(storageError);}window.Help.install();updateModelState();updateButtons();
   }
-  function updateButtons(){const busy=!!pending(active());$('#chat-send').hidden=busy;$('#chat-stop').hidden=!busy;$('#chat-send').disabled=!ready||!$('#chat-model').value||readingFiles>0;$('#chat-stop').disabled=!!(pending(active())?.stopRequested||pending(active())?.cancelRequested);$('#chat-model').disabled=busy||readingFiles>0;$('#chat-task').disabled=busy||readingFiles>0;$('#chat-folder-new').disabled=!ready;$('#chat-new').disabled=!ready||!state;$('#chat-new-compact').disabled=$('#chat-new').disabled;}
+  function updateButtons(){const busy=!!pending(active());$('#chat-send').hidden=busy;$('#chat-stop').hidden=!busy;$('#chat-send').disabled=!ready||!$('#chat-model').value||readingFiles>0;$('#chat-stop').disabled=!!(pending(active())?.stopRequested||pending(active())?.cancelRequested);$('#chat-model').disabled=busy||readingFiles>0;$('#chat-task').disabled=busy||readingFiles>0;$('#chat-folder-new').disabled=!ready;$('#chat-new').disabled=!ready||!state;}
   // Escape first, then add only a small set of known Markdown elements. Raw
   // HTML, remote images, scripts and arbitrary URL schemes are never rendered.
   function markdown(text){
@@ -303,7 +339,8 @@ window.Chat = (() => {
     if(t.prompt_per_second!=null)items.push('Prompt ≈ '+Number(t.prompt_per_second).toFixed(1)+' t/s');
     if(t.predicted_per_second!=null)items.push('Decode '+Number(t.predicted_per_second).toFixed(1)+' t/s');
     if(c.context_limit)items.push('Context '+fmt(c.used_tokens||c.input_tokens)+' / '+fmt(c.context_limit)+(c.accuracy?.startsWith('estimated')?' ≈':''));
-    if(m.finishReason==='length')items.push('Output limit reached');
+    if(c.compaction?.applied)items.push('Context compacted · '+fmt(c.compaction.input_tokens_before)+' → '+fmt(c.compaction.input_tokens_after)+(c.compaction.reused?' · summary reused':''));
+    if(m.finishReason==='length')items.push('Output limit reached'+(c.output_budget?' · request budget '+fmt(c.output_budget)+' tokens':''));
     return items.map(v=>`<span>${esc(v)}</span>`).join('');
   }
   // Follow is user intent, not a distance recomputed on every token. A small
@@ -443,6 +480,7 @@ window.Chat = (() => {
       for(const m of history){if(m.role==='user'&&m.task==='chat')body.messages.push({role:'user',content:vision&&m.attachments?.length?[{type:'text',text:m.content},...m.attachments.map(a=>({type:'image_url',image_url:{url:a.url}}))]:m.content});else if(m.role==='assistant'&&m.task==='chat'&&m.status==='completed')body.messages.push(...(m.apiHistory||[m.apiMessage||{role:'assistant',content:m.content}]).map(message=>!vision&&Array.isArray(message.content)?{...message,content:message.content.filter(p=>p.type==='text').map(p=>p.text).join('\n')}:message));}
       for(const name of ['max_tokens','temperature','top_p','top_k','min_p','presence_penalty','repetition_penalty','seed'])if(settings[name]!=='')body[name]=Number(settings[name]);
       body.timings_per_token=true;
+      if(settings.auto_compact==='false')body.auto_compact=false;
       if(settings.image_model){const imageModel=state.models.find(m=>m.id===settings.image_model);body.tools=InferenceClient.imageTools(imageModel,imageSources(t),settings.enhance_prompt,InferenceClient.settingsSize(imageModel,settings));}
       if(settings.thinking!=='')body.chat_template_kwargs={enable_thinking:settings.thinking==='true'};
     }else{
@@ -529,6 +567,12 @@ window.Chat = (() => {
       }
     }}finally{watching.delete(m.jobId);updateButtons();}
   }
+  async function clientRequestsFolder(){
+    const existing=[...folders.values()].find(f=>f.kind==='client-requests')||[...folders.values()].find(f=>f.name==='Client requests');
+    if(existing){await revealFolder(existing.id);return existing.id;}
+    const folder={id:uuid(),name:'Client requests',kind:'client-requests',created:Date.now(),collapsed:false};
+    await transaction('readwrite',store=>store.put(folder),'folders');folders.set(folder.id,folder);return folder.id;
+  }
   let recoveryQueue=Promise.resolve();
   function recover(jid){
     // Serialize activity opens so repeated clicks cannot both create a missing
@@ -545,7 +589,8 @@ window.Chat = (() => {
       }
       const job=await api('/api/jobs/'+jid),task=job.kind==='image'?(job.operation==='edit'?'edit':'image'):'chat';
       const m={id:uuid(),role:'assistant',model:job.model,task,jobId:jid,content:'',artifacts:[]};applyJob(m,job);
-      const t=await newChat({title:(job.prompt||'Recovered job').slice(0,50),task,model:job.model,
+      const folderId=await clientRequestsFolder();
+      const t=await newChat({title:(job.prompt||'Client request').slice(0,50),task,model:job.model,folderId,source:'client-request',
         messages:[{id:uuid(),role:'user',content:job.prompt||'Recovered request',task,attachments:[]},m]});
       watch(t,m);
     }).catch(e=>toast(e.message));
@@ -553,12 +598,15 @@ window.Chat = (() => {
   }
   function downloadJSON(value,name){const url=URL.createObjectURL(new Blob([JSON.stringify(value,null,2)],{type:'application/json'}));const a=document.createElement('a');a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),10000);}
   $('#chat-composer').onsubmit=send;
-  $('#chat-new').onclick=$('#chat-new-compact').onclick=()=>newChat().catch(storageError);
+  $('#chat-new').onclick=()=>newChat().catch(storageError);
   $('#chat-history-search').oninput=()=>{closeThreadMenu();filterHistory();$('#chat-threads').scrollTop=0;};
   $('#chat-folder-new').onclick=()=>openHistoryDialog('create');
   $('#chat-move').onclick=()=>{const id=threadMenuId;closeThreadMenu();if(threads.has(id))openHistoryDialog('move',id);};
   $('#chat-folder-form').onsubmit=saveHistoryDialog;
+  $('#chat-folder-remove-start').onclick=()=>setFolderRemovalStep(true);
+  $('#chat-folder-back').onclick=()=>setFolderRemovalStep(false);
   $('#chat-folder-remove').onclick=()=>removeHistoryFolder();
+  $('#chat-folder-delete-conversations').onchange=updateFolderRemovalNote;
   $('#chat-task').onchange=()=>{modelSignature='';updateModels();updateTask();};$('#chat-model').onchange=updateTask;
   options().oninput=()=>{checkpoint();save().catch(storageError);};
   options().onchange=()=>{updateTask();checkpoint();if(active()){active().settings=chatSettings();save().catch(storageError);}};
@@ -599,9 +647,10 @@ window.Chat = (() => {
   function updateHistoryLayout(){
     const open=!$('#chat-history').hidden,mobile=narrowChat.matches;
     $('#chat-history-scrim').hidden=!open||!mobile;
-    $('#chat-new-compact').hidden=open;
-    $('.chat-workspace').inert=open&&mobile;
+    $('.chat-layout').style.setProperty('--chat-history-top',($('.chat-toolbar').offsetHeight+12)+'px');
+    $('.chat-message-area').inert=$('.chat-composer-area').inert=open&&mobile;
   }
+  new ResizeObserver(updateHistoryLayout).observe($('.chat-toolbar'));
   $('#chat-history-close').onclick=$('#chat-history-scrim').onclick=()=>setPanel('chat-history-toggle','chat-history','history',false,true);
   narrowChat.addEventListener('change',()=>setPanel('chat-history-toggle','chat-history','history',!narrowChat.matches));
   for(const [button,panel,label] of panels)$('#'+button).onclick=()=>setPanel(button,panel,label,$('#'+panel).hidden);
@@ -657,9 +706,9 @@ window.Chat = (() => {
   window.addEventListener('pagehide',()=>{checkpoint();save().catch(()=>{});});
   document.addEventListener('keydown',e=>{
     if(e.key!=='Tab'||!narrowChat.matches||$('#chat-history').hidden||$('#chat-view').hidden||document.querySelector('dialog[open]'))return;
-    const controls=[...$('#chat-history').querySelectorAll('button,input,[tabindex="0"]')].filter(el=>!el.disabled&&el.getClientRects().length),first=controls[0],last=controls.at(-1);
-    if(e.shiftKey&&(document.activeElement===first||!$('#chat-history').contains(document.activeElement))){e.preventDefault();last?.focus();}
-    else if(!e.shiftKey&&(document.activeElement===last||!$('#chat-history').contains(document.activeElement))){e.preventDefault();first?.focus();}
+    const controls=[...$('.chat-toolbar').querySelectorAll('button,select'),...$('#chat-history').querySelectorAll('button,input,[tabindex="0"]')].filter(el=>!el.disabled&&el.getClientRects().length);
+    const index=controls.indexOf(document.activeElement),next=index<0?(e.shiftKey?controls.length-1:0):(index+(e.shiftKey?-1:1)+controls.length)%controls.length;
+    e.preventDefault();controls[next]?.focus();
   });
   setPanel('chat-history-toggle','chat-history','history',!narrowChat.matches);
   updateButtons();

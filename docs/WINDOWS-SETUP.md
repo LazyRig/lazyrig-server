@@ -4,11 +4,11 @@
 `start-server.bat`.** It runs setup if the application environment is missing,
 then starts LazyRig. You do not need to install Python manually.
 
-> **Testing v0.41:** read [safe beta setup and rollback](BETA-TEST.md) before using an existing installation.
+> **Testing v0.41:** read [upgrade and rollback](UPGRADING.md) before using an existing installation.
 
 ## First run
 
-1. Use the supplied `LazyRig_Server_v0.41beta.zip`.
+1. Use the supplied `LazyRig_Server_v0.41.zip`.
 2. Right-click the ZIP and choose **Extract All**. Use a writable location such
    as `C:\LazyRig`; open the extracted `lazyrig-server` folder. Keep the package
    together rather than moving a launcher out of it.
@@ -29,7 +29,7 @@ Continue with the [illustrated getting-started tutorial](GETTING-STARTED.md#2-ad
 
 Windows may show **Open File — Security Warning** for `start-server.bat`, with
 **Unknown publisher** and a notice that the file has no valid digital signature.
-This beta is distributed as a source ZIP with batch launchers; it does not include
+This release is distributed as a source ZIP with batch launchers; it does not include
 a signed Windows installer. Windows can use a downloaded file's origin metadata
 (Mark of the Web) to decide whether to display a warning, so the prompt can appear
 even when the launcher contents have not changed.
@@ -101,13 +101,13 @@ absolute paths. Use `setup-portable.bat` if the installation uses a private runt
 
 ## Upgrade without losing your work
 
-Stop the original server, extract this beta into a fresh folder and preserve the
+Stop the original server, extract this release into a fresh folder and preserve the
 original installation and original data untouched. Reuse external model paths and
-copy the whole stopped `server-data/` directory into the beta installation. If
+copy the whole stopped `server-data/` directory into the new installation. If
 using `--data-dir`, point it at that separate copy. Run setup in the new location.
 Never run two servers against the same data directory. To roll back, use the
-original application with the original data, not the beta-modified copy. Follow
-[the beta setup procedure](BETA-TEST.md).
+original application with the original data, not the upgraded copy. Follow
+[the upgrade procedure](UPGRADING.md).
 
 The browser stores chat history separately in IndexedDB. Keep the same browser,
 host and port, and use **History → Export** for an additional conversation copy.

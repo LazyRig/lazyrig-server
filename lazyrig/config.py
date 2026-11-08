@@ -4,6 +4,7 @@ import math
 import re
 from pathlib import Path
 from urllib.parse import urlsplit
+from .compaction import DEFAULTS as COMPACTION_DEFAULTS, validate as validate_compaction
 from .runtime_settings import validate_runtime
 from .mtp import validate_settings as validate_mtp
 from .image_sizes import validate_settings as validate_image_settings
@@ -13,6 +14,7 @@ from .sampling import FIELDS as SAMPLING_FIELDS, validate as validate_sampling
 from .placement import validate_placement, migrate_manual_allocations
 
 SERVER_DEFAULT = {
+    "context_compaction": copy.deepcopy(COMPACTION_DEFAULTS),
     "mode": "openvino", "data_dir": "server-data", "host": "127.0.0.1", "port": 8765,
     "api_key": "", "inference_api_key": "", "allowed_origins": [], "tls_cert": "", "tls_key": "", "models_dir": str(Path.cwd() / "models"),
     "browser_access": "origins",
@@ -42,6 +44,7 @@ def validate(config):
     # The chat image tool is now an explicit, per-request option only.
     for retired in ("default_auto_image", "default_image_model"):
         config.pop(retired, None)
+    config["context_compaction"] = validate_compaction(config.get("context_compaction", {}))
     config.setdefault("mode", "openvino")
     config.setdefault('terminal_metrics', True)
     if not isinstance(config['terminal_metrics'], bool):

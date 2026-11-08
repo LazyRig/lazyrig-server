@@ -69,7 +69,8 @@ def main():
                     page.goto(origin)
                     expect(page.locator('#connection')).to_have_text('Server online')
                     page.locator('nav [data-view="chat"]').click()
-                    page.locator('#chat-history-toggle').click()
+                    if not page.locator('#chat-history').is_visible():
+                        page.locator('#chat-history-toggle').click()
                     if '--expect-blocked' in sys.argv:
                         expect(page.locator('#chat-notice')).to_contain_text('Close other LazyRig tabs')
                         expect(page.locator('#chat-send')).to_be_disabled()
@@ -108,7 +109,8 @@ def main():
                     page.reload()
                     expect(page.locator('#connection')).to_have_text('Server online')
                     page.locator('nav [data-view="chat"]').click()
-                    page.locator('#chat-history-toggle').click()
+                    if not page.locator('#chat-history').is_visible():
+                        page.locator('#chat-history-toggle').click()
                     expect(page.locator(f'[data-folder="{folder}"] [data-thread="legacy-thread"]')).to_be_visible()
                     evidence['checks'].append(f'v{version}: folder membership survives an old tab saving and reload')
                     page.locator('#chat-prompt').fill('New request while the old tab is still open')
@@ -117,19 +119,23 @@ def main():
                     expect(page.locator('.message.assistant .message-body').last).to_contain_text('Test worker response.')
                     evidence['checks'].append(f'v{version}: real chat send completes')
                     page.locator(f'[data-folder-menu="{folder}"]').click()
-                    page.once('dialog', lambda dialog: dialog.accept())
+                    page.locator('#chat-folder-remove-start').click()
+                    page.locator('#chat-folder-delete-conversations').uncheck()
                     page.locator('#chat-folder-remove').click()
                     expect(page.locator(f'[data-folder="{folder}"]')).to_have_count(0)
                     expect(page.locator('[data-thread="legacy-thread"]')).to_be_visible()
                     if version == 2:
                         page.locator('[data-folder-menu="legacy-folder"]').click()
-                        page.once('dialog', lambda dialog: dialog.accept())
+                        page.locator('#chat-folder-remove-start').click()
+                        expect(page.locator('#chat-folder-removal-note')).to_contain_text('This folder is empty')
+                        expect(page.locator('#chat-folder-delete-conversations')).not_to_be_visible()
                         page.locator('#chat-folder-remove').click()
                         expect(page.locator('[data-folder="legacy-folder"]')).to_have_count(0)
                     page.reload()
                     expect(page.locator('#connection')).to_have_text('Server online')
                     page.locator('nav [data-view="chat"]').click()
-                    page.locator('#chat-history-toggle').click()
+                    if not page.locator('#chat-history').is_visible():
+                        page.locator('#chat-history-toggle').click()
                     expect(page.locator(f'[data-folder="{folder}"]')).to_have_count(0)
                     expect(page.locator('[data-thread="legacy-thread"]')).to_be_visible()
                     if version == 2:

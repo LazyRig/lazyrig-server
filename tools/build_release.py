@@ -15,7 +15,7 @@ USER_ROOT_FILES = {
 }
 USER_DOCS = {
     'GETTING-STARTED.md', 'WINDOWS-SETUP.md', 'CONNECTING.md', 'API.md', 'BETA-TEST.md',
-    'MODEL-SETTINGS.md', 'IMAGE-SETTINGS.md', 'PROMPT-ENHANCEMENT.md', 'MODEL-LICENSES.md', 'RUNTIME-UPDATES.md',
+    'MODEL-SETTINGS.md', 'CONTEXT-COMPACTION.md', 'UPGRADING.md', 'IMAGE-SETTINGS.md', 'PROMPT-ENHANCEMENT.md', 'MODEL-LICENSES.md', 'RUNTIME-UPDATES.md',
 }
 USER_TREE_PATTERNS = {
     'lazyrig': ('*.py', 'prompts/image_generation.txt', 'prompts/image_editing.txt',

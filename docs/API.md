@@ -30,7 +30,7 @@ field does not establish ownership.
 
 ## Admission, deadlines and transport limits
 
-The beta reserves capacity before remote-image retrieval and tokenization.
+The server reserves capacity before remote-image retrieval and tokenization.
 Default limits are eight active/queued/reserved jobs (`max_jobs`) and two requests
 preparing inputs (`max_preparing`). `/api/context` also uses bounded preparation
 and the request budget; it cannot bypass capacity through preflight. Retries of the same idempotency key serialize
@@ -103,7 +103,7 @@ Output allowance precedence is `max_completion_tokens`, then `max_tokens`, then
 the model's saved `generation.max_tokens`, then 8,192 tokens. The client may
 choose a different allowance on every request without reloading a compatible
 worker. Input plus the requested allowance must fit the configured context;
-LazyRig rejects overflow instead of silently reducing the client's allowance.
+Automatic context compaction may summarize eligible older exchanges to make room. It never silently reduces the client's output allowance; protected input that still cannot fit is rejected. Send `auto_compact: false` to preserve the exact prompt.
 
 Completed inference that fails tool-call validation returns its error without
 dispatching any client tool. A malformed JSON response returns HTTP 502 with
@@ -257,7 +257,7 @@ The result has `id`, `object: "chat.completion"`, `created`, `model`, `choices`,
 
 `fits` checks input plus the requested output budget. `remaining_tokens` excludes already generated tokens; it does not reserve future output. `remaining_after_budget` reserves the complete requested output budget. Counts include the actual rendered chat template, tool definitions and any runtime-emitted reasoning tokens. The configured context limit is an operator setting, not automatically discovered physical memory. `usage` counts all completed LLM passes for the request, while `x_context` describes the latest pass.
 
-Malformed requests fail with HTTP 400 before queuing. Synchronous non-streaming chat also checks context before queuing. Streaming and asynchronous chat prepare/tokenize inside the job, so context overflow is reported through its SSE error or saved job result. Model loading/generation failure returns HTTP 500 with `x_job_id`. Backend error messages are preserved for troubleshooting. An overflow after a server-managed image may fail the request while retaining its artifact in `x_artifacts` and the job record. The adapter does not silently truncate or compact. Automatic model placement can try the explicitly allowed device pool during loading, with each change recorded in job events; it does not replay text generation. Bounded inference retries cover incomplete server-managed tool output and the specific native image GPU resource errors described below.
+Malformed requests fail with HTTP 400 before queuing. Synchronous non-streaming chat also checks context before queuing. Streaming and asynchronous chat prepare/tokenize inside the job, so context overflow is reported through its SSE error or saved job result. Model loading/generation failure returns HTTP 500 with `x_job_id`. Backend error messages are preserved for troubleshooting. An overflow after a server-managed image may fail the request while retaining its artifact in `x_artifacts` and the job record. Automatic context compaction is enabled by default, is reported in `x_compaction`, and can be disabled with `auto_compact: false`. Original stored messages remain intact. Automatic model placement can try the explicitly allowed device pool during loading, with each change recorded in job events; it does not replay completed text generation. One context-overflow recovery attempt is allowed before any response text is exposed. Bounded inference retries also cover incomplete server-managed tool output and the specific native image GPU resource errors described below.
 
 ### Streaming
 
@@ -406,6 +406,14 @@ Switching generation/editing on the same alias closes the old worker before cons
 
 Use `POST /api/image/edits` with either body format, or send `Prefer: respond-async` to `/v1/images/edits`, to receive a job ID immediately and retrieve the saved result later. Authentication and browser-origin rules are the same as the generation endpoint.
 
+## Automatic context compaction
+
+Enabled by default for Chat, `/v1/chat/completions`, `/api/chat/jobs`, and legacy sessions. Server settings accept a `context_compaction` object; see [settings and behavior](CONTEXT-COMPACTION.md). `auto_compact: false` disables both proactive compaction and overflow recovery for one chat request. Explicit client output limits always override the model default.
+
+`x_compaction` in completed JSON responses and the terminal SSE chunk reports whether compaction was applied/reused, prompt tokens before/after, summary calls, summary-only token usage, and duration. It is also available on the job as `compaction` and within `x_context.compaction`. Summary generation is local, uses the same model with tools/thinking disabled, and is not streamed as the answer. Normal `usage` and `timings` describe answer passes; compaction work is reported separately. HTTP end-to-end latency includes that work.
+
+`/api/context` remains a count-only inspection. `compaction_available` indicates eligible history and `compaction_needed` indicates pressure; neither promises that a safe summary will fit. Inspection never generates a summary or loads the model. Original stored transcripts and browser history are preserved. Clients continue sending their own histories; a bounded in-memory cache can reuse a matching prefix summary, and is cleared on restart.
+
 ## Context preflight
 
 `POST /api/context`
@@ -421,9 +429,12 @@ Use `POST /api/image/edits` with either body format, or send `Prefer: respond-as
 
 Returns the context object directly. Supply the same messages, output budget, tools, `image_sources` and `enhance_prompt` settings as the upcoming request. `tools` includes client function definitions; `auto_image: true` includes available server generation/edit tools and source IDs. This preflight describes the initial chat pass; a subsequent enhancement pass has its own context check. Text preflight can report `fits: false` without running inference. LLM tokenizers run on CPU independently of GPU model residency.
 
-For image input, preflight returns `accuracy: "estimated-multimodal"`, `image_count`, and `visual_tokens_included: false`. If text/placeholders plus the output budget already exceed the configured context limit, `fits` is `false` and inference is rejected. Otherwise `fits` remains `null` because visual-token expansion is not yet known. Numeric input/remaining counts at this stage cover text and placeholders, not expanded vision embeddings. The image request cannot be guaranteed to fit before native preprocessing, which the pipeline performs within generation. Final native performance metrics reconcile `input_tokens`, set `accuracy: "exact"` and `visual_tokens_included: true`, and calculate `fits` from that total. If native input metrics are unavailable, the response retains its estimated label. The prompt digest includes image content, so changing pixels changes `prompt_sha256`. Image downloads/storage also occur during context checks and are deduplicated locally.
+For image input, preflight returns `accuracy: "estimated-multimodal"`, `image_count`, and `visual_tokens_included: false`. If text/placeholders plus the output budget already exceed the configured context limit, `fits` is `false`; eligible text history can be compacted before inference, otherwise the request is rejected. Otherwise `fits` remains `null` because visual-token expansion is not yet known. Numeric input/remaining counts at this stage cover text and placeholders, not expanded vision embeddings. The image request cannot be guaranteed to fit before native preprocessing, which the pipeline performs within generation. Final native performance metrics reconcile `input_tokens`, set `accuracy: "exact"` and `visual_tokens_included: true`, and calculate `fits` from that total. If native input metrics are unavailable, the response retains its estimated label. The prompt digest includes image content, so changing pixels changes `prompt_sha256`. Image downloads/storage also occur during context checks and are deduplicated locally.
 
 ## Model registry and lifecycle
+
+Saving `/api/settings` reloads an already loaded model when pipeline construction settings change. The response retains its state shape and adds `settings_effects` with `reload_job_id`, `reloading_models`, and `unloaded_models`. Follow the reload job to completion or inspect Recent activity. Changes to sampling, template flags, context/output budgets or display name apply without reloading compatible workers. Unloaded models stay unloaded; disabling unloads the model. Device-policy evictions remain unloaded. Reload failures keep the saved configuration and expose a failed job, rather than claiming the new worker is ready.
+
 
 | Method | Endpoint | Body or result |
 |---|---|---|

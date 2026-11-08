@@ -2,14 +2,14 @@
 
 **Local chat, vision and image generation in one browser workspace.**
 
-**v0.41 beta** · Built on OpenVINO™ GenAI · [Apache 2.0](LICENSE)
+**v0.41** · Built on OpenVINO™ GenAI · [Apache 2.0](LICENSE)
 
 LazyRig runs compatible AI models on your computer. Chat with a language model,
 ask questions about pictures, generate and edit images, or connect another
 application through an OpenAI-compatible API subset. Manage your models and
 choose their devices from the same interface.
 
-[Download v0.41 beta](https://github.com/lazyrig/lazyrig-server/releases/tag/v0.41beta)
+[Download v0.41](https://github.com/lazyrig/lazyrig-server/releases/tag/v0.41)
 · [Step-by-step setup with screenshots](docs/GETTING-STARTED.md)
 · [Connect a client](docs/CONNECTING.md)
 
@@ -28,8 +28,8 @@ choose their devices from the same interface.
 
 ## Start on Windows
 
-1. Download **`LazyRig_Server_v0.41beta.zip`** from the
-   [release assets](https://github.com/lazyrig/lazyrig-server/releases/tag/v0.41beta).
+1. Download **`LazyRig_Server_v0.41.zip`** from the
+   [release assets](https://github.com/lazyrig/lazyrig-server/releases/tag/v0.41).
 2. **Extract the whole ZIP** into a writable folder, then open `lazyrig-server`.
 3. Double-click **`start-server.bat`**. The first run prepares Python and installs
    dependencies; leave the console open.
@@ -76,11 +76,12 @@ See [client setup](docs/CONNECTING.md) and the [API reference](docs/API.md).
 | Connect a client or configure network access | [Connections](docs/CONNECTING.md) |
 | Build an integration | [API reference](docs/API.md) |
 | Update the inference runtime | [Runtime updates](docs/RUNTIME-UPDATES.md) |
-| Upgrade, roll back or understand beta limits | [Beta guide](docs/BETA-TEST.md) |
+| Upgrade from v0.41 beta | [Upgrade guide](docs/UPGRADING.md) |
+| Configure context protection | [Automatic context compaction](docs/CONTEXT-COMPACTION.md) |
 
 ## Current limits
 
-This is a **beta for trusted local use**. Image editing uses one source image.
+Designed for **trusted local use**. Image editing uses one source image.
 Multi-device splitting is experimental. Work sharing a device runs serially;
 a server restart interrupts unfinished inference. The API supports a documented
 subset of OpenAI endpoints, and there is no isolation between users' jobs or files.
@@ -93,7 +94,7 @@ model/export, runtime and driver versions, and the steps that reproduce it.
 
 Conversations are stored in your browser; jobs, generated files and settings are
 stored on the server. Back them up separately. For an existing installation,
-follow [upgrade and rollback instructions](docs/BETA-TEST.md#safe-setup-with-an-existing-installation).
+follow [upgrade and rollback instructions](docs/UPGRADING.md).
 
 ## License and acknowledgements
 

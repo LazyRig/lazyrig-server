@@ -285,7 +285,6 @@ body.chat-open{height:100dvh;display:grid;grid-template-rows:74px minmax(0,1fr)}
 #chat-folder-dialog{width:min(440px,calc(100vw - 32px));box-sizing:border-box}
 #chat-folder-dialog .actions{gap:8px;margin-top:14px}
 #chat-folder-dialog .actions .primary{margin-top:0}
-#chat-folder-dialog .actions .close-dialog{font-size:14px;line-height:1.5;color:#d8dfe4}
 #chat-folder-dialog .danger{color:var(--red)}
 /* Blocking startup needs an alert beside the controls, not a muted footnote. */
 .chat-storage-warning{display:flex;flex:none;align-items:flex-start;gap:12px;margin:0 0 18px;padding:14px 16px;border:1px solid #80613f;border-radius:7px;background:var(--selected-bg);color:var(--text)}

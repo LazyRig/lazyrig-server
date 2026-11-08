@@ -1,5 +1,18 @@
 # Changelog
 
+## v0.41 — 2026-11-02
+
+- Open external request progress/results in a dedicated **Client requests** folder. Repeated opens reuse the saved conversation; normal chats keep their selected-folder behavior.
+- Keep SERVER CONTROL's original spacing and left alignment, and fit the LAZYRIG wordmark to the subtitle's natural width at desktop sidebar sizes.
+- Redesign folder management with a compact header, conversation count and consistent action footer. Removal opens a dedicated confirmation step with a default-on **Delete conversations** switch and an explicit outcome; switching it off keeps conversations in the main history list. Back preserves an unfinished rename. Preserve unrelated conversations and block deletion while a conversation in that folder is active.
+- Match Save/Cancel typography. Keep one larger New chat button in the main toolbar, including while history is open; remove the duplicate history-header button.
+- Add configurable automatic context compaction for local chat and client requests. Reserve the requested output allowance, preserve instructions/latest turns/images/tool groups, summarize older exchanges with the same local model, and recheck the resulting token count. Keep stored transcripts unchanged, reuse only matching history prefixes, and expose compaction metrics separately from answer timings.
+- Add `auto_compact: false` for exact-prompt workloads, bounded cancellation/deadlines, explicit failures when protected inputs cannot fit, and one recovery attempt for a native context overflow before any answer text is exposed.
+- Automatically reload loaded models after construction-setting changes; apply per-request settings without a restart. Show reload status and failure details, and leave unloaded/disabled or budget-evicted models unloaded.
+- Show the request's output-token budget when a response reaches its limit. Document the separate fixed Quality output budget in LazyRig Bench; explicit client limits continue to take precedence over saved model defaults.
+- Add regressions for compaction safety, synchronous/streamed/background delivery, opt-out, caching, cancellation, and settings reloads. Update release/upgrade documentation; preserve the release builder's public-file allowlist.
+
+
 ## v0.41 beta — 2026-10-07
 
 Priority production-readiness hardening on the v0.4 beta baseline. Install into a

@@ -141,8 +141,8 @@ class SplitArchiveTests(unittest.TestCase):
             if name != 'MANIFEST.sha256.json':
                 self.assertEqual(self.archives['creator'].get(name), data, name)
 
-    def test_prerelease_version_is_not_truncated_in_either_archive_name(self):
-        self.assertIn('beta', __version__)
+    def test_version_is_not_truncated_in_either_archive_name(self):
+        self.assertRegex(__version__, r'^\d+\.\d+(?:[A-Za-z0-9.-]+)?$')
         for label, path in (('Server', self.user_path), ('Source', self.creator_path)):
             self.assertEqual(path.name, f'LazyRig_{label}_v{__version__}.zip')
             self.assertIn(f'__version__ = "{__version__}"'.encode(),

@@ -34,7 +34,10 @@ class RuntimeSettingsTests(unittest.TestCase):
                      'max_num_batched_tokens': 128, 'max_num_seqs': 1,
                      'cache_interval_multiplier': 64, 'dynamic_split_fuse': True}
         state = self.json('/api/settings', {'model': 'qwen-chat', 'plugin_config': plugin, 'scheduler_config': scheduler})
-        self.assertFalse(self.service.scheduler.resident)
+        reload_id = state['settings_effects']['reload_job_id']
+        self.assertIsNotNone(reload_id)
+        self.assertEqual(wait_job(self.service, reload_id)['status'], 'completed')
+        self.assertIn('qwen-chat', self.service.scheduler.resident)
         self.assertIn(('close', 'qwen-chat'), factory.lifecycle)
         self.assertEqual(len(state['runtime_controls']), len(CONTROLS))
         model = state['models'][0]
@@ -46,7 +49,8 @@ class RuntimeSettingsTests(unittest.TestCase):
         wait_job(self.service, self.json('/api/models/qwen-chat/load', {})['id'])
         self.assertEqual(seen[-1]['plugin_config'], plugin)
         self.assertEqual(seen[-1]['scheduler_config'], scheduler)
-        self.json('/api/settings', {'model': 'qwen-chat', 'plugin_config': {}, 'scheduler_config': {}})
+        result = self.json('/api/settings', {'model': 'qwen-chat', 'plugin_config': {}, 'scheduler_config': {}})
+        wait_job(self.service, result['settings_effects']['reload_job_id'])
         self.assertEqual(self.service.model('qwen-chat')['plugin_config'], {})
         self.assertEqual(self.service.model('qwen-chat')['scheduler_config'], {})
 

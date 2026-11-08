@@ -19,8 +19,8 @@ or a promise that every export works. Models and GPU drivers are not bundled.
 
 ### Windows
 
-1. Download **`LazyRig_Server_v0.41beta.zip`** from the
-   [v0.41 beta release assets](https://github.com/lazyrig/lazyrig-server/releases/tag/v0.41beta).
+1. Download **`LazyRig_Server_v0.41.zip`** from the
+   [v0.41 release assets](https://github.com/lazyrig/lazyrig-server/releases/tag/v0.41).
    Choose this named application download.
 2. Use **Extract All**, then open the extracted **`lazyrig-server`** folder.
    Keep all its files together in a writable location, such as `C:\LazyRig`.
@@ -34,7 +34,7 @@ The browser does not open automatically. An empty model list is expected.
 
 On later starts, use the same `start-server.bat`. Press **Ctrl+C** in its console
 to stop LazyRig. For installer choices and repairs, see [Windows setup](WINDOWS-SETUP.md).
-If upgrading an existing installation, follow the [beta upgrade guide](BETA-TEST.md#safe-setup-with-an-existing-installation).
+If upgrading an existing installation, follow the [upgrade guide](UPGRADING.md).
 
 ### Linux
 
@@ -268,7 +268,7 @@ continue, but later conversation/tool stages wait for the browser to return.
 Stopping or restarting the server interrupts unfinished inference. Saved results
 remain available. Changing browser or server address can show a different chat history.
 
-For upgrades and backups, follow the [beta guide](BETA-TEST.md).
+For upgrades and backups, follow the [upgrade guide](UPGRADING.md).
 
 ## If something does not work
 
@@ -284,7 +284,7 @@ For upgrades and backups, follow the [beta guide](BETA-TEST.md).
 
 Bug reports should include the LazyRig version, device, runtime/driver versions,
 model/export and steps to reproduce the issue. Remove keys and private content
-from shared logs. [Current beta limits](BETA-TEST.md#current-limits).
+from shared logs. [Current limits](BETA-TEST.md#current-limits).
 
 [README](../README.md) · [Model settings](MODEL-SETTINGS.md) ·
 [Image settings](IMAGE-SETTINGS.md) · [Runtime updates](RUNTIME-UPDATES.md) · [API](API.md)

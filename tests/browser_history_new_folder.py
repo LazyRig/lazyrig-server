@@ -36,7 +36,8 @@ def main():
                 page.goto('http://127.0.0.1:' + str(server.server_port))
                 expect(page.locator('#connection')).to_have_text('Server online')
                 page.locator('nav [data-view="chat"]').click()
-                page.locator('#chat-history-toggle').click()
+                if not page.locator('#chat-history').is_visible():
+                    page.locator('#chat-history-toggle').click()
 
                 def active_id():
                     # A selected folder can differ from the conversation still displayed.
@@ -46,13 +47,9 @@ def main():
                     return page.locator(f'[data-folder-toggle="{folder}"]')
 
                 def expect_destination(name=None):
-                    indicator = page.locator('#chat-new-destination')
                     if name:
-                        expect(indicator).to_be_visible()
-                        expect(page.locator('#chat-new-folder')).to_have_text(name)
                         expect(page.locator('#chat-new')).to_have_attribute('aria-label', f'New chat in folder “{name}”')
                     else:
-                        expect(indicator).not_to_be_visible()
                         expect(page.locator('#chat-new')).to_have_attribute('aria-label', 'New chat outside folders')
 
                 def add_folder(name):
@@ -160,7 +157,8 @@ def main():
                 page.reload()
                 expect(page.locator('#connection')).to_have_text('Server online')
                 page.locator('nav [data-view="chat"]').click()
-                page.locator('#chat-history-toggle').click()
+                if not page.locator('#chat-history').is_visible():
+                    page.locator('#chat-history-toggle').click()
                 expect(page.locator('#chat-prompt')).to_have_value('Keep the outside draft')
                 expect(page.locator('[data-folder-toggle][aria-current="location"]')).to_have_count(0)
                 expect_destination()
@@ -186,7 +184,8 @@ def main():
                 page.reload()
                 expect(page.locator('#connection')).to_have_text('Server online')
                 page.locator('nav [data-view="chat"]').click()
-                page.locator('#chat-history-toggle').click()
+                if not page.locator('#chat-history').is_visible():
+                    page.locator('#chat-history-toggle').click()
                 expect(page.locator(f'[data-folder="{validation}"] [data-thread="{fifth}"]')).to_have_attribute('aria-current', 'true')
                 sixth = new_chat(validation)
                 expected = {first: validation, second: validation, third: other, fourth: other, fifth: validation, sixth: validation, hidden_child: validation, outside_selected_child: None, immediate_outside: None, closed_created: validation}
@@ -203,7 +202,8 @@ def main():
                 page.reload()
                 expect(page.locator('#connection')).to_have_text('Server online')
                 page.locator('nav [data-view="chat"]').click()
-                page.locator('#chat-history-toggle').click()
+                if not page.locator('#chat-history').is_visible():
+                    page.locator('#chat-history-toggle').click()
                 expect(folder_button(validation)).to_have_attribute('aria-expanded', 'false')
                 expect_destination('Validation')
                 new_chat(validation)
@@ -251,7 +251,8 @@ def main():
 
                 folder_button(other).click()
                 page.locator(f'[data-folder-menu="{other}"]').click()
-                page.once('dialog', lambda dialog: dialog.accept())
+                page.locator('#chat-folder-remove-start').click()
+                page.locator('#chat-folder-delete-conversations').uncheck()
                 page.locator('#chat-folder-remove').click()
                 expect(folder_button(other)).to_have_count(0)
                 new_chat(None)
